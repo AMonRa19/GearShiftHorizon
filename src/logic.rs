@@ -6,6 +6,7 @@ pub struct Tcu {
     last_shift: Option<Instant>,
     last_timestamp: Option<u32>,
     telemetry_lost: bool,
+    pending_shift: Option<(u8, u8, Instant)>,
 }
 impl Tcu {
     pub fn on_telemetry_timeout(&mut self) { self.telemetry_lost=true; }
@@ -14,7 +15,9 @@ impl Tcu {
     }
     fn issue(&mut self, td:&Telemetry, target:u8, reason:&'static str) -> Option<ShiftCommand> {
         if target==td.gear { return None; }
-        self.last_shift=Some(Instant::now());
+        let now = Instant::now();
+        self.last_shift=Some(now);
+        self.pending_shift=Some((td.gear, target, now));
         Some(ShiftCommand{from:td.gear,to:target,reason})
     }
     pub fn process(&mut self, td:&Telemetry, cfg:&Config, _dt:f32, profile:Option<&CarProfile>) -> Option<ShiftCommand> {
@@ -23,10 +26,21 @@ impl Tcu {
         if let Some(previous) = self.last_timestamp {
             if td.session_timestamp < previous || td.is_race_on == 0 {
                 self.last_shift = None;
+                self.pending_shift = None;
             }
         }
         self.last_timestamp = Some(td.session_timestamp);
         self.telemetry_lost = false;
+        // Do not queue another key press while the previous shift is still
+        // travelling through FH6 input/telemetry. This prevents cascading
+        // upshifts (e.g. 7 -> 8 -> 9 -> 10) from one sustained RPM threshold.
+        if let Some((from, target, sent_at)) = self.pending_shift {
+            if td.gear == target || td.gear != from || sent_at.elapsed() >= std::time::Duration::from_millis(1400) {
+                self.pending_shift = None;
+            } else {
+                return None;
+            }
+        }
         if !cfg.automatic || td.is_race_on==0 || td.gear==0 || td.gear>10 || !self.can_shift(cfg) { return None; }
         if td.engine_max_rpm<=0.0 || td.current_rpm<=0.0 { return None; }
 
@@ -51,7 +65,7 @@ impl Tcu {
                 let predicted_pct = profile.and_then(|p| {
                     let ratio = *p.gear_ratio.get(target_gear)?;
                     let samples = *p.gear_samples.get(target_gear)?;
-                    if samples < 8 || !ratio.is_finite() || ratio <= 0.0001 { return None; }
+                    if samples < 4 || !ratio.is_finite() || ratio <= 0.0001 { return None; }
                     let predicted_rpm = td.speed_ms / ratio;
                     let value = predicted_rpm / td.engine_max_rpm;
                     if value.is_finite() { Some(value) } else { None }

@@ -66,8 +66,8 @@ fn main() -> Result<()> {
                     let mut cal = calibration.write().unwrap();
                     cal.observe(&td, previous.as_ref(), !observed_auto_shift);
                     if let Some(profile) = cal.active() {
-                        if profile.upshift_observations >= 3 { settings.upshift_rpm_pct = profile.upshift_rpm_pct; }
-                        if profile.downshift_observations >= 3 { settings.downshift_rpm_pct = profile.downshift_rpm_pct; }
+                        if profile.upshift_observations >= 2 { settings.upshift_rpm_pct = profile.upshift_rpm_pct; }
+                        if profile.downshift_observations >= 2 { settings.downshift_rpm_pct = profile.downshift_rpm_pct; }
                         Some(profile.clone())
                     } else { None }
                 };

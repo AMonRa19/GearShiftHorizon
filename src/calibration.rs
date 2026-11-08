@@ -45,10 +45,15 @@ impl CalibrationStore {
         p.car_class=t.car_class; p.pi=t.pi; p.drivetrain=t.drivetrain; p.samples+=1;
         p.last_seen_unix=SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
         let gear=t.gear as usize;
-        if gear>0 && gear<11 && t.current_rpm>500.0 && t.speed_ms>5.0 && t.speed_ms.is_finite() {
+        let stable_gear = previous.map(|prev| prev.car_ordinal == t.car_ordinal && prev.gear == t.gear).unwrap_or(true);
+        if gear>0 && gear<11 && stable_gear && t.current_rpm>900.0 && t.speed_ms>8.0
+            && t.speed_ms.is_finite() && t.brake()<0.08 && t.rear_slip()<0.30 {
             let ratio=t.speed_ms/t.current_rpm;
             if ratio.is_finite() && ratio>0.0001 && ratio<1.0 {
-                let n=p.gear_samples[gear]; p.gear_ratio[gear]=if n==0 {ratio} else {p.gear_ratio[gear]*0.97+ratio*0.03};
+                let n=p.gear_samples[gear];
+                // Faster EMA than the first prototype: the ratio converges in
+                // fewer clean samples while still rejecting noisy packets.
+                p.gear_ratio[gear]=if n==0 {ratio} else {p.gear_ratio[gear]*0.88+ratio*0.12};
                 p.gear_samples[gear]=n.saturating_add(1);
             }
         }
@@ -63,9 +68,9 @@ impl CalibrationStore {
             if prev.car_ordinal==t.car_ordinal && prev.gear>0 && prev.gear<=10 && prev.gear!=t.gear {
                 let before=prev.rpm_pct().clamp(0.0,1.2);
                 if t.gear>prev.gear && prev.throttle()>0.45 && prev.brake()<0.1 {
-                    let n=p.upshift_observations; p.upshift_rpm_pct=(if n==0 {before} else {p.upshift_rpm_pct*0.9+before*0.1}).clamp(0.65,0.98); p.upshift_observations=n.saturating_add(1);
+                    let n=p.upshift_observations; p.upshift_rpm_pct=(if n==0 {before} else {p.upshift_rpm_pct*0.78+before*0.22}).clamp(0.68,0.96); p.upshift_observations=n.saturating_add(1);
                 } else if t.gear<prev.gear && (prev.brake()>0.25 || prev.throttle()>0.55) {
-                    let n=p.downshift_observations; p.downshift_rpm_pct=(if n==0 {before} else {p.downshift_rpm_pct*0.9+before*0.1}).clamp(0.18,0.68); p.downshift_observations=n.saturating_add(1);
+                    let n=p.downshift_observations; p.downshift_rpm_pct=(if n==0 {before} else {p.downshift_rpm_pct*0.78+before*0.22}).clamp(0.20,0.66); p.downshift_observations=n.saturating_add(1);
                 }
             }
         }}

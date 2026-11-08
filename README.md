@@ -63,3 +63,10 @@ The Features section includes all 11 requested switches. In this early port, the
 ### Исправление торможения двигателем
 
 Автоматическое понижение при торможении теперь использует обученные передаточные коэффициенты конкретной машины: оценивает обороты после перехода на следующую нижнюю передачу и переключает только в безопасном диапазоне. При сильном торможении допускается более высокий целевой RPM, но с запасом до ограничителя. Пока для пары машина/передача нет минимум 8 измерений, используется консервативный резервный порог. Для тормозных понижений интервал между командами ограничен сверху 180 мс (при этом фактическая скорость зависит также от задержки клавиатурной команды и реакции игры). Функция активна, когда включены Brake Downshift и Engine Brake.
+
+
+## Shift confirmation and faster per-car learning
+- The TCU now waits for telemetry to confirm each requested gear before sending another shift command (up to 1.4 s). This prevents queued/cascading upshifts through several gears.
+- Per-gear ratio learning uses clean, stable-gear samples and a faster exponential moving average.
+- Learned shift thresholds are applied after two observed manual shifts and adapt more quickly, with safety clamps.
+- If FH6 does not confirm a shift within 1.4 s, the pending lock expires; the TCU can retry after the normal shift interval.
