@@ -6,6 +6,11 @@ pub mod telemetry;
 mod ui;
 mod web;
 
+fn is_newer_timestamp(candidate: u32, current: u32) -> bool {
+    let delta = candidate.wrapping_sub(current);
+    delta != 0 && delta < 0x8000_0000
+}
+
 use anyhow::Result;
 use config::Config;
 use crossbeam_channel::{unbounded, TryRecvError};
@@ -53,38 +58,32 @@ fn main() -> Result<()> {
         let mut tcu = logic::Tcu::default();
         let mut previous: Option<Telemetry> = None;
         let mut expected_tcu_gear: Option<(u8, Instant)> = None;
-        // Run the decision loop at 60 Hz, independently of UDP packet arrival.
-        // If several packets arrive between ticks, use the newest sample only.
-        const TCU_TICK: Duration = Duration::from_nanos(16_666_667);
-        let mut next_tick = Instant::now();
+        // Event-driven control: react as soon as a fresh UDP frame arrives.
+        // If several frames are queued, discard stale ones and process only
+        // the newest. FH telemetry normally arrives around 60 Hz, so this
+        // removes the old deliberate wait-until-next-tick latency.
         let mut last = Instant::now();
         let mut latest: Option<Telemetry> = None;
+        let mut ui_calibration_counter: u8 = 0;
         loop {
-            next_tick += TCU_TICK;
-            // Collect packets until the tick boundary instead of processing
-            // immediately on packet arrival, keeping the logic cadence at 60 Hz.
-            while Instant::now() < next_tick {
-                let wait = next_tick.saturating_duration_since(Instant::now());
-                match rx.recv_timeout(wait) {
-                    Ok(td) => latest = Some(td),
-                    Err(_) => break,
+            match rx.recv_timeout(Duration::from_millis(250)) {
+                Ok(td) => latest = Some(td),
+                Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
+                    tcu.on_telemetry_timeout();
+                    continue;
                 }
+                Err(crossbeam_channel::RecvTimeoutError::Disconnected) => break,
             }
-            // Include any packets queued right at the boundary, retaining only
-            // the newest telemetry frame for this logic iteration.
             loop {
                 match rx.try_recv() {
-                    Ok(td) => latest = Some(td),
+                    Ok(td) => {
+                        let replace = latest.as_ref().map(|current| is_newer_timestamp(td.session_timestamp, current.session_timestamp)).unwrap_or(true);
+                        if replace { latest = Some(td); }
+                    }
                     Err(TryRecvError::Empty | TryRecvError::Disconnected) => break,
                 }
             }
-
-            let Some(td) = latest.take() else {
-                tcu.on_telemetry_timeout();
-                if Instant::now() > next_tick + TCU_TICK { next_tick = Instant::now(); }
-                continue;
-            };
-
+            let Some(td) = latest.take() else { continue; };
             let now = Instant::now();
             let dt = now.duration_since(last).as_secs_f32().clamp(0.001, 0.2);
             last = now;
@@ -92,23 +91,25 @@ fn main() -> Result<()> {
             if expected_tcu_gear.map(|(target, sent)| target == td.gear || sent.elapsed() > Duration::from_millis(1800)).unwrap_or(false) { expected_tcu_gear = None; }
             let active_profile = {
                 let mut cal = calibration.write().unwrap();
-                cal.observe(&td, previous.as_ref(), true);
+                cal.observe(&td, previous.as_ref(), settings.features.power_curve_learning);
                 if let Some(profile) = cal.active() {
-                    if profile.upshift_observations >= 2 { settings.upshift_rpm_pct = profile.upshift_rpm_pct; }
-                    if profile.downshift_observations >= 2 { settings.downshift_rpm_pct = profile.downshift_rpm_pct; }
+                    if profile.upshift_observations >= 8 { settings.upshift_rpm_pct = profile.upshift_rpm_pct; }
+                    if profile.downshift_observations >= 8 { settings.downshift_rpm_pct = profile.downshift_rpm_pct; }
                     Some(profile.clone())
                 } else { None }
             };
             if let Some(cmd) = tcu.process(&td, &settings, dt, active_profile.as_ref()) {
+                info!("TCU shift {} -> {} | {} | {:.0} RPM | {:.1} km/h", cmd.from, cmd.to, cmd.reason, td.current_rpm, td.speed_kmh());
                 expected_tcu_gear = Some((cmd.to, Instant::now()));
                 let _ = cmd_logic.send(cmd);
             }
             ui::publish_snapshot(td.clone());
-            ui::publish_calibration(calibration.read().unwrap().clone());
+            ui_calibration_counter = ui_calibration_counter.wrapping_add(1);
+            if ui_calibration_counter >= 6 {
+                ui::publish_calibration(calibration.read().unwrap().clone());
+                ui_calibration_counter = 0;
+            }
             previous = Some(td);
-
-            // Avoid a catch-up burst after a slow iteration.
-            if Instant::now() > next_tick + TCU_TICK { next_tick = Instant::now(); }
         }
     })?;
 

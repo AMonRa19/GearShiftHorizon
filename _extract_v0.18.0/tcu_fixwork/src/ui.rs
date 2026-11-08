@@ -61,12 +61,14 @@ impl eframe::App for TcuApp {
                             ui.heading("АВТОКАЛИБРОВКА · текущая машина");
                             if let Some(p)=cal.active() {
                                 ui.label(format!("Автомобиль ID {} · класс {} · PI {} · {} пакетов",p.car_ordinal,p.car_class,p.pi,p.samples));
+                                ui.label(format!("Достоверность обучения: {:.0}% · стиль езды: {:.0}% агрессивности",p.learning_confidence*100.0,p.drive_style_aggression*100.0));
+                                ui.label(format!("Точки мощности: {} · передачи с обучением ускорения: {}",p.power_curve.iter().filter(|x|x.samples>=12).count(),p.gear_accel_samples.iter().filter(|n|**n>=20).count()));
                                 ui.horizontal_wrapped(|ui| {
                                     ui.label(format!("Повышение: {:.0}% RPM · {} наблюдений",p.upshift_rpm_pct*100.0,p.upshift_observations));
                                     ui.label(format!("Понижение: {:.0}% RPM · {} наблюдений",p.downshift_rpm_pct*100.0,p.downshift_observations));
                                 });
                                 ui.label("Изученные передаточные отношения:");
-                                ui.horizontal_wrapped(|ui| { for g in 1..=10 { if p.gear_samples[g]>0 { ui.label(format!("{}: {:.4} ({} шт.)",g,p.gear_ratio[g],p.gear_samples[g])); } } });
+                                ui.horizontal_wrapped(|ui| { for g in 1..=10 { if p.gear_samples[g]>=30 { ui.label(format!("{}: {:.4} ({} шт.)",g,p.gear_ratio[g],p.gear_samples[g])); } } });
                                 if ui.button("Сбросить калибровку этой машины").clicked() { let mut store=CALIBRATION.get_or_init(||Mutex::new(CalibrationStore::default())).lock().unwrap(); store.reset_active(); }
                                 ui.columns(2,|cols| {
                                     draw_chart(&mut cols[0],"Обороты · % redline",&cal.history.iter().filter(|x|x.car_ordinal==cal.active_car).map(|x|x.rpm_pct*100.0).collect::<Vec<_>>(),egui::Color32::from_rgb(57,181,255));

@@ -110,14 +110,23 @@ Automatic shift cooldown is fixed at 350 ms, matching `Cfg.SHIFT_COOLDOWN_MS` in
 
 ### Частота обработки и импульс переключения
 
-- TCU logic loop работает с целевой частотой **60 Hz** (один цикл примерно каждые 16,67 мс). Если между циклами пришло несколько UDP-пакетов, используется самый свежий снимок телеметрии.
+- Логика TCU обрабатывает каждый новый UDP-снимок сразу по приходу; при очереди выбирается самый свежий пакет с учётом session timestamp. При штатной частоте телеметрии FH6 это обычно около **60 Hz** (примерно 16,67 мс между кадрами), без дополнительного ожидания границы цикла.
 - Автоматический cooldown переключений остаётся **350 мс** и не зависит от частоты цикла.
-- Удержание клавиши по умолчанию — **40 мс**; пауза между повторными импульсами при переключении через несколько передач — **60 мс**.
+- Удержание клавиши по умолчанию — **40 мс**; пауза между повторными импульсами при переключении через несколько передач — **60 мс**. Промежуточные показания передач при многопозиционном переключении теперь считаются прогрессом одной команды, а не ошибкой подтверждения.
 
 ## Shift recovery changes (experimental, not yet compiled)
 
 - Added a redline override at 98.5% of reported maximum RPM so normal cornering/traction locks do not leave the engine on the limiter. Pending telemetry acknowledgement still prevents repeated commands while a shift is in flight.
 - Kickdown can now begin above 2 km/h rather than waiting for 18 km/h, allowing recovery when accelerating from a stop in an excessively high gear.
 - Braking downshifts can begin above 4 km/h; the uncalibrated fallback no longer applies an overly high idle-RPM floor that could block every downshift at low RPM.
-- Added a progressive deceleration-recovery downshift when speed falls while throttle is low. Cornering/traction locks no longer suppress that recovery path, though airtime lock remains active.
+- Added a progressive deceleration-recovery downshift when speed falls and an impact-recovery path for sudden speed loss. Cornering/traction/airtime locks no longer suppress critical recovery paths.
 - These thresholds are a first correction pass and need in-game telemetry validation across cars, especially to confirm the redline override and fallback RPM estimates do not cause over-revving.
+
+
+## Adaptive learning and low-latency control
+
+- The control worker is event-driven: it processes the newest UDP telemetry frame immediately and coalesces queued stale/out-of-order frames instead of waiting for a fixed tick boundary. At the game's normal telemetry cadence this is typically around 60 Hz.
+- Per-car calibration learns RPM-per-speed ratios per gear, a filtered engine power curve, acceleration response per gear, and a bounded driving-aggression score. Samples are accepted only during stable, straight, low-slip pulls. A gear model needs at least 30 clean ratio samples; a power-curve bucket needs at least 12 samples before it can influence target-gear selection.
+- Once the learned data is sufficiently populated, downshift selection evaluates candidate gears using predicted RPM and a wheel-force proxy derived from estimated engine torque and the learned ratio. Until then, conservative sequential fallback logic remains active.
+- Redline and post-impact/deceleration recovery have priority over routine cornering, traction, and airtime locks; airtime lock still suppresses ordinary shifts while airborne. Ordinary shifts retain the 350 ms cooldown; critical redline protection uses its own guarded path.
+- Calibration confidence is a coverage indicator based on learned ratios, power-curve points, and per-gear acceleration samples; it is not a claim of perfect or machine-learning certainty.

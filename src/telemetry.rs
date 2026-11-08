@@ -20,6 +20,14 @@ pub struct Telemetry {
     pub slip_fl: f32, pub slip_fr: f32, pub slip_rl: f32, pub slip_rr: f32,
 }
 impl Telemetry {
+    fn core_values_finite(&self) -> bool {
+        [self.engine_max_rpm, self.idle_rpm, self.current_rpm,
+         self.accel_x, self.accel_y, self.accel_z,
+         self.vel_x, self.vel_y, self.vel_z,
+         self.speed_ms, self.power_w, self.torque_nm, self.boost_raw,
+         self.slip_fl, self.slip_fr, self.slip_rl, self.slip_rr]
+            .iter().all(|v| v.is_finite())
+    }
     fn f32_at(b: &[u8], o: usize) -> Option<f32> {
         Some(f32::from_le_bytes(b.get(o..o+4)?.try_into().ok()?))
     }
@@ -48,6 +56,7 @@ impl Telemetry {
         t.slip_fl=Self::f32_at(b,84)?; t.slip_fr=Self::f32_at(b,88)?;
         t.slip_rl=Self::f32_at(b,92)?; t.slip_rr=Self::f32_at(b,96)?;
         t.accel_raw=b[315]; t.brake_raw=b[316]; t.clutch_raw=b[317]; t.gear=b[319];
+        if !t.core_values_finite() { return None; }
         Some(t)
     }
     pub fn speed_kmh(&self) -> f32 {
