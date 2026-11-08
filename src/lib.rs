@@ -1,1 +1,1 @@
-pub mod telemetry;\n
+pub mod telemetry;
