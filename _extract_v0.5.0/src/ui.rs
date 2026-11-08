@@ -10,11 +10,11 @@ pub fn publish_calibration(c:CalibrationStore) { *CALIBRATION.get_or_init(||Mute
 fn draw_chart(ui:&mut egui::Ui, title:&str, values:&[f32], color:egui::Color32) {
     ui.label(title); let (rect,_) = ui.allocate_exact_size(egui::vec2(ui.available_width(),130.0),egui::Sense::hover());
     let painter=ui.painter_at(rect); painter.rect_filled(rect,5.0,egui::Color32::from_rgb(12,18,27));
-    for i in 1..5 { let y=rect.top()+rect.height()*i as f32/5.0; painter.line_segment([egui::pos2(rect.left(),y),egui::pos2(rect.right(),y)],egui::Stroke::new(1.0,egui::Color32::from_gray(45))); }
+    for i in 1..5 { let y=rect.top()+rect.height()*i as f32/5.0; painter.line_segment([egui::pos2(rect.left(),y),egui::pos2(rect.right(),y)],egui::Stroke::new(1.0_f32,egui::Color32::from_gray(45))); }
     if values.len()<2 { painter.text(rect.center(),egui::Align2::CENTER_CENTER,"Сбор данных…",egui::FontId::proportional(14.0),egui::Color32::GRAY); return; }
     let min=values.iter().copied().fold(f32::INFINITY,f32::min); let max=values.iter().copied().fold(f32::NEG_INFINITY,f32::max); let span=(max-min).max(0.001);
     let pts:Vec<egui::Pos2>=values.iter().enumerate().map(|(i,v)|egui::pos2(rect.left()+rect.width()*i as f32/(values.len()-1) as f32,rect.bottom()-6.0-((*v-min)/span)*(rect.height()-12.0))).collect();
-    painter.add(egui::Shape::line(pts,egui::Stroke::new(2.0,color)));
+    painter.add(egui::Shape::line(pts,egui::Stroke::new(2.0_f32,color)));
 }
 
 pub struct TcuApp { cfg:Arc<RwLock<Config>>, status:String }

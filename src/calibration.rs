@@ -36,6 +36,10 @@ impl CalibrationStore {
         if t.is_race_on==0 || t.car_ordinal<=0 || t.engine_max_rpm<=0.0 { return; }
         self.active_car=t.car_ordinal;
         let mut save_due=false;
+        // Compute graph values outside the profile-update scope so they are also
+        // available when the telemetry history point is appended below.
+        let rpm_pct=t.rpm_pct().clamp(0.0,1.2);
+        let power_kw=(t.power_w/1000.0).max(0.0);
         {
         let p=self.profiles.entry(t.car_ordinal).or_insert_with(||CarProfile{car_ordinal:t.car_ordinal,..CarProfile::default()});
         p.car_class=t.car_class; p.pi=t.pi; p.drivetrain=t.drivetrain; p.samples+=1;
@@ -48,8 +52,6 @@ impl CalibrationStore {
                 p.gear_samples[gear]=n.saturating_add(1);
             }
         }
-        let rpm_pct=t.rpm_pct().clamp(0.0,1.2);
-        let power_kw=(t.power_w/1000.0).max(0.0);
         if power_kw.is_finite() && rpm_pct>0.1 && t.throttle()>0.65 {
             let bucket=((rpm_pct*20.0).round() as i32).clamp(2,24) as f32/20.0;
             if let Some(pt)=p.power_curve.iter_mut().find(|x|(x.rpm_pct-bucket).abs()<0.026) {
