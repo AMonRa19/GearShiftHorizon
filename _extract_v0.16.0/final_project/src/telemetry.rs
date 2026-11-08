@@ -2,7 +2,7 @@ use std::convert::TryInto;
 
 pub const FH6_PACKET_SIZE: usize = 324;
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, serde::Serialize)]
 pub struct Telemetry {
     pub is_race_on: i32,
     pub session_timestamp: u32,

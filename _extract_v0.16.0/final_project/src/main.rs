@@ -20,7 +20,8 @@ fn main() -> Result<()> {
     env_logger::init();
     let cfg = Arc::new(RwLock::new(Config::load()?));
     let calibration = Arc::new(RwLock::new(calibration::CalibrationStore::load()));
-    web::start(Arc::clone(&cfg), Arc::clone(&calibration));
+    let live_telemetry = Arc::new(RwLock::new(None::<Telemetry>));
+    web::start(Arc::clone(&cfg), Arc::clone(&calibration), Arc::clone(&live_telemetry));
     let (tx, rx) = unbounded::<Telemetry>();
     let (cmd_tx, cmd_rx) = unbounded::<input::ShiftCommand>();
 
@@ -77,10 +78,12 @@ fn main() -> Result<()> {
                     expected_tcu_gear = Some((cmd.to, Instant::now()));
                     let _ = cmd_logic.send(cmd);
                 }
+                *live_telemetry.write().unwrap() = Some(td.clone());
                 ui::publish_snapshot(td.clone());
                 ui::publish_calibration(calibration.read().unwrap().clone());
                 previous = Some(td);
             } else {
+                *live_telemetry.write().unwrap() = None;
                 tcu.on_telemetry_timeout();
             }
         }

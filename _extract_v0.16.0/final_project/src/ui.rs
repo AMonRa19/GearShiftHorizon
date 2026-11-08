@@ -31,6 +31,13 @@ impl eframe::App for TcuApp {
                 ui.heading("FH6 Virtual TCU — Rust");
                 ui.separator();
                 ui.label("Локальная панель управления");
+                ui.separator();
+                let connected = td.as_ref().map(|t| t.is_race_on != 0).unwrap_or(false);
+                let led_color = if connected { egui::Color32::from_rgb(20, 220, 120) } else { egui::Color32::from_rgb(245, 70, 88) };
+                let (led_rect, _) = ui.allocate_exact_size(egui::vec2(12.0, 12.0), egui::Sense::hover());
+                let pulse = if connected { 0.8 + ((ctx.input(|i| i.time) * 3.2).sin() as f32 + 1.0) * 0.9 } else { 5.0 };
+                ui.painter().circle_filled(led_rect.center(), pulse, led_color);
+                ui.label(if connected { "ИГРА ПОДКЛЮЧЕНА" } else { "НЕТ СВЯЗИ С FH6" });
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.add(egui::Slider::new(&mut self.ui_scale,0.80..=1.35).text("Масштаб").show_value(true));
                     ui.hyperlink_to("Открыть браузерную панель", "http://127.0.0.1:8765");
@@ -48,7 +55,7 @@ impl eframe::App for TcuApp {
                         ui.group(|ui| { ui.label("ГАЗ / ТОРМОЗ"); ui.heading(format!("{:.0}% / {:.0}%",t.throttle()*100.0,t.brake()*100.0)); });
                         ui.group(|ui| { ui.label("АВТОМОБИЛЬ"); ui.heading(format!("ID {} · {} · PI {}",t.car_ordinal,t.car_class,t.pi)); });
                     });
-                } else { ui.label("Ожидание телеметрии FH6…"); }
+                } else { self.status = "Нет связи с FH6 — ожидаю телеметрию".into(); ui.label("Ожидание телеметрии FH6…"); }
                 ui.label(&self.status);
                 ui.separator();
                 let available=ui.available_width();
