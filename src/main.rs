@@ -8,7 +8,7 @@ mod web;
 
 use anyhow::Result;
 use config::Config;
-use crossbeam_channel::unbounded;
+use crossbeam_channel::{unbounded, TryRecvError};
 use log::{error, info};
 use std::{net::UdpSocket, sync::{Arc, RwLock}, thread, time::{Duration, Instant}};
 use telemetry::Telemetry;
@@ -53,33 +53,62 @@ fn main() -> Result<()> {
         let mut tcu = logic::Tcu::default();
         let mut previous: Option<Telemetry> = None;
         let mut expected_tcu_gear: Option<(u8, Instant)> = None;
+        // Run the decision loop at 60 Hz, independently of UDP packet arrival.
+        // If several packets arrive between ticks, use the newest sample only.
+        const TCU_TICK: Duration = Duration::from_nanos(16_666_667);
+        let mut next_tick = Instant::now();
         let mut last = Instant::now();
+        let mut latest: Option<Telemetry> = None;
         loop {
-            if let Ok(td) = rx.recv_timeout(Duration::from_millis(100)) {
-                let now = Instant::now();
-                let dt = now.duration_since(last).as_secs_f32().clamp(0.001, 0.2);
-                last = now;
-                let mut settings = cfg_logic.read().unwrap().clone();
-                if expected_tcu_gear.map(|(target, sent)| target == td.gear || sent.elapsed() > Duration::from_millis(1800)).unwrap_or(false) { expected_tcu_gear = None; }
-                let active_profile = {
-                    let mut cal = calibration.write().unwrap();
-                    cal.observe(&td, previous.as_ref(), true);
-                    if let Some(profile) = cal.active() {
-                        if profile.upshift_observations >= 2 { settings.upshift_rpm_pct = profile.upshift_rpm_pct; }
-                        if profile.downshift_observations >= 2 { settings.downshift_rpm_pct = profile.downshift_rpm_pct; }
-                        Some(profile.clone())
-                    } else { None }
-                };
-                if let Some(cmd) = tcu.process(&td, &settings, dt, active_profile.as_ref()) {
-                    expected_tcu_gear = Some((cmd.to, Instant::now()));
-                    let _ = cmd_logic.send(cmd);
+            next_tick += TCU_TICK;
+            // Collect packets until the tick boundary instead of processing
+            // immediately on packet arrival, keeping the logic cadence at 60 Hz.
+            while Instant::now() < next_tick {
+                let wait = next_tick.saturating_duration_since(Instant::now());
+                match rx.recv_timeout(wait) {
+                    Ok(td) => latest = Some(td),
+                    Err(_) => break,
                 }
-                ui::publish_snapshot(td.clone());
-                ui::publish_calibration(calibration.read().unwrap().clone());
-                previous = Some(td);
-            } else {
-                tcu.on_telemetry_timeout();
             }
+            // Include any packets queued right at the boundary, retaining only
+            // the newest telemetry frame for this logic iteration.
+            loop {
+                match rx.try_recv() {
+                    Ok(td) => latest = Some(td),
+                    Err(TryRecvError::Empty | TryRecvError::Disconnected) => break,
+                }
+            }
+
+            let Some(td) = latest.take() else {
+                tcu.on_telemetry_timeout();
+                if Instant::now() > next_tick + TCU_TICK { next_tick = Instant::now(); }
+                continue;
+            };
+
+            let now = Instant::now();
+            let dt = now.duration_since(last).as_secs_f32().clamp(0.001, 0.2);
+            last = now;
+            let mut settings = cfg_logic.read().unwrap().clone();
+            if expected_tcu_gear.map(|(target, sent)| target == td.gear || sent.elapsed() > Duration::from_millis(1800)).unwrap_or(false) { expected_tcu_gear = None; }
+            let active_profile = {
+                let mut cal = calibration.write().unwrap();
+                cal.observe(&td, previous.as_ref(), true);
+                if let Some(profile) = cal.active() {
+                    if profile.upshift_observations >= 2 { settings.upshift_rpm_pct = profile.upshift_rpm_pct; }
+                    if profile.downshift_observations >= 2 { settings.downshift_rpm_pct = profile.downshift_rpm_pct; }
+                    Some(profile.clone())
+                } else { None }
+            };
+            if let Some(cmd) = tcu.process(&td, &settings, dt, active_profile.as_ref()) {
+                expected_tcu_gear = Some((cmd.to, Instant::now()));
+                let _ = cmd_logic.send(cmd);
+            }
+            ui::publish_snapshot(td.clone());
+            ui::publish_calibration(calibration.read().unwrap().clone());
+            previous = Some(td);
+
+            // Avoid a catch-up burst after a slow iteration.
+            if Instant::now() > next_tick + TCU_TICK { next_tick = Instant::now(); }
         }
     })?;
 
