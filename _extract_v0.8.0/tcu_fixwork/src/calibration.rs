@@ -53,14 +53,14 @@ impl CalibrationStore {
                 let n=p.gear_samples[gear];
                 // Faster EMA than the first prototype: the ratio converges in
                 // fewer clean samples while still rejecting noisy packets.
-                p.gear_ratio[gear]=if n==0 {ratio} else {p.gear_ratio[gear]*0.88+ratio*0.12};
+                p.gear_ratio[gear]=if n==0 {ratio} else {p.gear_ratio[gear]*0.78+ratio*0.22};
                 p.gear_samples[gear]=n.saturating_add(1);
             }
         }
-        if power_kw.is_finite() && rpm_pct>0.1 && t.throttle()>0.65 {
+        if power_kw.is_finite() && rpm_pct>0.1 && t.throttle()>0.55 {
             let bucket=((rpm_pct*20.0).round() as i32).clamp(2,24) as f32/20.0;
             if let Some(pt)=p.power_curve.iter_mut().find(|x|(x.rpm_pct-bucket).abs()<0.026) {
-                pt.power_kw=pt.power_kw*0.9+power_kw*0.1; pt.samples=pt.samples.saturating_add(1);
+                pt.power_kw=pt.power_kw*0.82+power_kw*0.18; pt.samples=pt.samples.saturating_add(1);
             } else { p.power_curve.push(CurvePoint{rpm_pct:bucket,power_kw,samples:1}); p.power_curve.sort_by(|a,b|a.rpm_pct.total_cmp(&b.rpm_pct)); }
             if p.power_curve.len()>24 { p.power_curve.remove(0); }
         }
@@ -69,7 +69,7 @@ impl CalibrationStore {
                 let before=prev.rpm_pct().clamp(0.0,1.2);
                 if t.gear>prev.gear && prev.throttle()>0.45 && prev.brake()<0.1 {
                     let n=p.upshift_observations; p.upshift_rpm_pct=(if n==0 {before} else {p.upshift_rpm_pct*0.78+before*0.22}).clamp(0.68,0.96); p.upshift_observations=n.saturating_add(1);
-                } else if t.gear<prev.gear && (prev.brake()>0.25 || prev.throttle()>0.55) {
+                } else if t.gear<prev.gear && (prev.brake()>0.10 || prev.throttle()>0.55) {
                     let n=p.downshift_observations; p.downshift_rpm_pct=(if n==0 {before} else {p.downshift_rpm_pct*0.78+before*0.22}).clamp(0.20,0.66); p.downshift_observations=n.saturating_add(1);
                 }
             }

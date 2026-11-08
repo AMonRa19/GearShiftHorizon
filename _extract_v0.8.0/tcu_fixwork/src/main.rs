@@ -60,11 +60,10 @@ fn main() -> Result<()> {
                 let dt = now.duration_since(last).as_secs_f32().clamp(0.001, 0.2);
                 last = now;
                 let mut settings = cfg_logic.read().unwrap().clone();
-                let observed_auto_shift = previous.as_ref().map(|prev| prev.gear != td.gear && expected_tcu_gear.map(|(target, _)| target == td.gear).unwrap_or(false)).unwrap_or(false);
                 if expected_tcu_gear.map(|(target, sent)| target == td.gear || sent.elapsed() > Duration::from_millis(1800)).unwrap_or(false) { expected_tcu_gear = None; }
                 let active_profile = {
                     let mut cal = calibration.write().unwrap();
-                    cal.observe(&td, previous.as_ref(), !observed_auto_shift);
+                    cal.observe(&td, previous.as_ref(), true);
                     if let Some(profile) = cal.active() {
                         if profile.upshift_observations >= 2 { settings.upshift_rpm_pct = profile.upshift_rpm_pct; }
                         if profile.downshift_observations >= 2 { settings.downshift_rpm_pct = profile.downshift_rpm_pct; }
