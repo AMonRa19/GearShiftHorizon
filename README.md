@@ -94,3 +94,10 @@ The Features section includes all 11 requested switches. In this early port, the
 - Профиль `Drift`: уменьшает задержку реакции, раньше запрашивает понижение при нажатии газа и ослабляет Cornering/Transient Lock только в пределах более высокого порога, чтобы контролируемый занос не блокировал каждую команду. Защита от чрезмерной боковой нагрузки и сильного срыва остаётся. Автоматическое торможение двигателем в Drift выключено, чтобы не провоцировать резкий перенос веса; для замедления используйте Race/Comfort.
 - Добавлен параметр `shift_delay_ms` (100–1200 мс) в desktop и browser UI. Он задаёт базовую минимальную паузу между командами; профили применяют безопасные диапазоны поверх этого значения. `shift_hold_ms` и `shift_gap_ms` по-прежнему управляют длительностью нажатия клавиши.
 - `Drag` и `Drift` — эвристические пресеты. Они не считывают реальные настройки коробки из FH6; автокалибровка конкретной машины продолжает использовать `car_ordinal`. Проверяйте их на закрытой/безопасной площадке.
+
+
+## Braking / kickdown correction
+
+The current control logic uses the corrected per-gear calibration ratio (engine RPM per m/s). Older inverse-ratio samples are invalidated automatically as each gear is observed again. Braking downshifts are no longer blocked by longitudinal deceleration or the cornering lock: the cornering lock now inhibits torque-driven shifts in a loaded turn, while braking downshifts remain available on corner entry. The braking target is checked against an idle-RPM floor and a mode-dependent safe RPM ceiling, rather than requiring an unnecessarily high minimum RPM. Kickdown and torque downshift checks also use the predicted RPM in the next gear.
+
+After updating, allow the car to collect clean steady-speed samples again. Calibration files are kept, but old inverse-ratio samples are discarded per gear when new valid samples arrive.

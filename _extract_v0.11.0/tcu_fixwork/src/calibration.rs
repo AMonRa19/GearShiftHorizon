@@ -48,8 +48,14 @@ impl CalibrationStore {
         let stable_gear = previous.map(|prev| prev.car_ordinal == t.car_ordinal && prev.gear == t.gear).unwrap_or(true);
         if gear>0 && gear<11 && stable_gear && t.current_rpm>900.0 && t.speed_ms>8.0
             && t.speed_ms.is_finite() && t.brake()<0.08 && t.rear_slip()<0.30 {
-            let ratio=t.speed_ms/t.current_rpm;
-            if ratio.is_finite() && ratio>0.0001 && ratio<1.0 {
+            // Older prototypes stored the inverse (m/s per RPM). Invalidate
+            // those samples before mixing them with the corrected RPM/(m/s) ratio.
+            if p.gear_samples[gear] > 0 && p.gear_ratio[gear] < 1.0 {
+                p.gear_ratio[gear] = 0.0;
+                p.gear_samples[gear] = 0;
+            }
+            let ratio=t.current_rpm/t.speed_ms;
+            if ratio.is_finite() && ratio>1.0 && ratio<2000.0 {
                 let n=p.gear_samples[gear];
                 // Faster EMA than the first prototype: the ratio converges in
                 // fewer clean samples while still rejecting noisy packets.

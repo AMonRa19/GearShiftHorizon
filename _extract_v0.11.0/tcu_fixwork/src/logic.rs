@@ -31,8 +31,9 @@ impl Tcu {
         let p = profile?;
         let ratio = *p.gear_ratio.get(target_gear)?;
         let samples = *p.gear_samples.get(target_gear)?;
-        if samples < 3 || !ratio.is_finite() || ratio <= 0.0001 { return None; }
-        let predicted_rpm = td.speed_ms / ratio;
+        if samples < 3 || !ratio.is_finite() || ratio <= 1.0 || ratio >= 2000.0 { return None; }
+        // Calibration stores RPM per m/s (not its inverse).
+        let predicted_rpm = td.speed_ms * ratio;
         let pct = predicted_rpm / td.engine_max_rpm;
         if pct.is_finite() && pct > 0.0 { Some(pct) } else { None }
     }
@@ -129,28 +130,40 @@ impl Tcu {
         // Keep the current gear while airborne or during high lateral load.
         // This allows braking downshifts on approach, but avoids unsettling the car mid-corner.
         if cfg.features.airtime_lock && td.accel_z.abs() > 1.8 && speed > 35.0 { return None; }
-        if cfg.features.cornering_lock && td.accel_x.abs().max(td.accel_y.abs()) > corner_limit { return None; }
+        // In Forza telemetry accel_y is strongly affected by longitudinal
+        // braking/acceleration. Only lateral acceleration should inhibit a
+        // shift; otherwise hard braking can accidentally lock out downshifts.
+        let lateral_g = td.accel_x.abs();
+        let in_high_lateral_load = lateral_g > corner_limit;
+        let braking_intent = brake >= if cfg.features.brake_curve { 0.08 } else { 0.13 }
+            && throttle < 0.25;
+        // Cornering lock is for torque-driven shifts in a loaded turn. It must
+        // never suppress a deliberate braking downshift on corner entry.
+        if cfg.features.cornering_lock && in_high_lateral_load && !braking_intent { return None; }
         if cfg.features.transient_lock && td.rear_slip() > slip_limit { return None; }
 
-        // Engine braking: choose a lower gear only when its predicted RPM is in
-        // a useful braking band and safely below the limiter. With sparse learning
-        // data, estimate a conservative one-step ratio instead of waiting forever.
-        if cfg.brake_downshift && cfg.features.engine_brake && engine_brake_enabled && td.gear > 1 && speed > 12.0
-            && throttle < 0.18 && brake >= if cfg.features.brake_curve { 0.10 } else { 0.16 } {
+        // Engine braking: react to brake pedal before the car nearly stops.
+        // A lower gear is allowed when predicted RPM remains below a safety
+        // ceiling. If the next gear would over-rev, wait for road speed to fall
+        // and re-evaluate on the next telemetry packets.
+        if cfg.brake_downshift && cfg.features.engine_brake && engine_brake_enabled
+            && td.gear > 1 && speed > 8.0 && throttle < 0.25 && braking_intent {
             let target_gear = (td.gear - 1) as usize;
             let learned = Self::predicted_target_rpm_pct(td, profile, target_gear);
-            let estimated = learned.or_else(|| {
-                // Typical adjacent-gear RPM rise is roughly 18–30%; deliberately
-                // use the lower end until this exact car/gear has been learned.
-                let value = pct * 1.20;
-                if value.is_finite() { Some(value) } else { None }
-            });
-            let target_pct = estimated.unwrap_or(1.0);
-            let rpm_ceiling = if brake > 0.70 { 0.88 } else if brake > 0.35 { 0.84 } else { 0.80 };
-            let useful_rpm = target_pct >= 0.42 && target_pct <= rpm_ceiling;
-            // Faster sequential braking shifts, but still wait for telemetry confirmation.
-            let brake_interval = brake_delay_ms;
-            if useful_rpm && self.elapsed_since_shift() >= Duration::from_millis(brake_interval) {
+            // Conservative fallback until this car/gear has enough clean samples.
+            let target_pct = learned.unwrap_or(pct * 1.24);
+            let rpm_ceiling = if brake > 0.75 { 0.94 } else if brake > 0.35 { 0.90 } else { 0.86 };
+            // Do not wait for a high RPM threshold: at high gears the engine
+            // can be well below 30% RPM while the next gear is still useful.
+            // Keep only a small margin above idle to avoid an excessively low
+            // target on slow approaches.
+            let idle_floor = (td.idle_rpm / td.engine_max_rpm + 0.035).clamp(0.16, 0.32);
+            let safe_to_downshift = target_pct.is_finite()
+                && target_pct >= idle_floor && target_pct <= rpm_ceiling;
+            // On the approach to a corner, allow braking downshifts even under
+            // longitudinal deceleration; only sustained high lateral G blocks them.
+            if safe_to_downshift && (!in_high_lateral_load || brake >= 0.65)
+                && self.elapsed_since_shift() >= Duration::from_millis(brake_delay_ms.min(320)) {
                 return self.issue(td, td.gear - 1, "ENGINE BRAKE");
             }
         }
@@ -160,14 +173,18 @@ impl Tcu {
         let effective_kickdown_rpm = if cfg.features.turbo_lag_compensation && td.boost_raw < 0.15 {
             (kickdown_rpm + 0.04).min(0.80)
         } else { kickdown_rpm };
-        if self.elapsed_since_shift() >= Duration::from_millis(normal_interval)
-            && throttle >= kickdown_throttle && pct < effective_kickdown_rpm && td.gear > 2 && speed > 25.0 {
+        let next_gear_rpm = Self::predicted_target_rpm_pct(td, profile, (td.gear - 1) as usize)
+            .unwrap_or(pct * 1.24);
+        let torque_downshift_safe = next_gear_rpm.is_finite() && next_gear_rpm <= 0.92;
+        if self.elapsed_since_shift() >= Duration::from_millis(normal_interval.min(360))
+            && throttle >= kickdown_throttle && pct < effective_kickdown_rpm.max(0.62)
+            && td.gear > 1 && speed > 18.0 && torque_downshift_safe {
             return self.issue(td, td.gear - 1, "KICKDOWN");
         }
-        if self.elapsed_since_shift() >= Duration::from_millis(normal_interval)
-            && throttle > 0.45 && brake < 0.05 && pct < downshift_pct
-            && td.gear > 2 && speed > 20.0
-            && (!cfg.features.drivetrain_aware || td.rear_slip() < 0.45) {
+        if self.elapsed_since_shift() >= Duration::from_millis(normal_interval.min(420))
+            && throttle > 0.52 && brake < 0.05 && pct < downshift_pct.max(0.46)
+            && td.gear > 1 && speed > 18.0 && torque_downshift_safe
+            && (!cfg.features.drivetrain_aware || td.rear_slip() < 0.60) {
             return self.issue(td, td.gear - 1, "TORQUE DOWN");
         }
 
