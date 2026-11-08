@@ -76,8 +76,8 @@ The Features section includes all 11 requested switches. In this early port, the
 - Кривая мощности обучается уже при уверенном газе от 55%.
 - Пороговые наблюдения учитывают тормозные понижения начиная с 10% педали тормоза.
 - При торможении целевые обороты после понижения рассчитываются по выученному отношению передачи; пока данных мало, используется консервативная оценка одного шага.
-- Понижения при торможении могут идти с интервалом 260–420 мс, но только последовательно и с подтверждением фактической передачи.
-- Повышения ограничены интервалом не менее 900 мс и блокировкой повторного повышения до падения оборотов ниже порога с гистерезисом. Это защищает от каскада 7→8→9→10.
+- Автоматические переключения используют общий cooldown 350 мс для повышения и понижения; каждое следующее переключение ожидает подтверждения фактической передачи по телеметрии.
+- Повторное повышение дополнительно защищено защёлкой `upshift_armed`, чтобы исключить каскад 7→8→9→10.
 
 Калибровка остаётся оценочной: телеметрия FH6 не предоставляет прямые параметры коробки из меню тюнинга. Проверяйте новые пороги на безопасном участке и следите за прогнозируемыми оборотами после понижения.
 
@@ -92,7 +92,7 @@ The Features section includes all 11 requested switches. In this early port, the
 
 - Добавлен профиль `Drag`: повышает порог апшифта (удержание передачи до высоких оборотов), снижает склонность к лишним дауншифтам и использует более спокойный интервал команд.
 - Профиль `Drift`: уменьшает задержку реакции, раньше запрашивает понижение при нажатии газа и ослабляет Cornering/Transient Lock только в пределах более высокого порога, чтобы контролируемый занос не блокировал каждую команду. Защита от чрезмерной боковой нагрузки и сильного срыва остаётся. Автоматическое торможение двигателем в Drift выключено, чтобы не провоцировать резкий перенос веса; для замедления используйте Race/Comfort.
-- Добавлен параметр `shift_delay_ms` (100–1200 мс) в desktop и browser UI. Он задаёт базовую минимальную паузу между командами; профили применяют безопасные диапазоны поверх этого значения. `shift_hold_ms` и `shift_gap_ms` по-прежнему управляют длительностью нажатия клавиши.
+- Интервал автоматического переключения фиксирован на 350 мс, как в оригинальном TCU; длительность импульса клавиши и пауза между импульсами задаются отдельно (`shift_hold_ms` и `shift_gap_ms`).
 - `Drag` и `Drift` — эвристические пресеты. Они не считывают реальные настройки коробки из FH6; автокалибровка конкретной машины продолжает использовать `car_ordinal`. Проверяйте их на закрытой/безопасной площадке.
 
 
@@ -101,3 +101,23 @@ The Features section includes all 11 requested switches. In this early port, the
 The current control logic uses the corrected per-gear calibration ratio (engine RPM per m/s). Older inverse-ratio samples are invalidated automatically as each gear is observed again. Braking downshifts are no longer blocked by longitudinal deceleration or the cornering lock: the cornering lock now inhibits torque-driven shifts in a loaded turn, while braking downshifts remain available on corner entry. The braking target is checked against an idle-RPM floor and a mode-dependent safe RPM ceiling, rather than requiring an unnecessarily high minimum RPM. Kickdown and torque downshift checks also use the predicted RPM in the next gear.
 
 After updating, allow the car to collect clean steady-speed samples again. Calibration files are kept, but old inverse-ratio samples are discarded per gear when new valid samples arrive.
+
+
+## Shift timing parity with upstream
+
+Automatic shift cooldown is fixed at 350 ms, matching `Cfg.SHIFT_COOLDOWN_MS` in the upstream Forza-Love Virtual TCU. The same cooldown applies to upshifts, torque downshifts, and braking downshifts; the pending-shift acknowledgement still prevents repeated commands while the game has not confirmed a gear change. Key hold/gap timing remains separate.
+
+
+### Частота обработки и импульс переключения
+
+- TCU logic loop работает с целевой частотой **60 Hz** (один цикл примерно каждые 16,67 мс). Если между циклами пришло несколько UDP-пакетов, используется самый свежий снимок телеметрии.
+- Автоматический cooldown переключений остаётся **350 мс** и не зависит от частоты цикла.
+- Удержание клавиши по умолчанию — **40 мс**; пауза между повторными импульсами при переключении через несколько передач — **60 мс**.
+
+## Shift recovery changes (experimental, not yet compiled)
+
+- Added a redline override at 98.5% of reported maximum RPM so normal cornering/traction locks do not leave the engine on the limiter. Pending telemetry acknowledgement still prevents repeated commands while a shift is in flight.
+- Kickdown can now begin above 2 km/h rather than waiting for 18 km/h, allowing recovery when accelerating from a stop in an excessively high gear.
+- Braking downshifts can begin above 4 km/h; the uncalibrated fallback no longer applies an overly high idle-RPM floor that could block every downshift at low RPM.
+- Added a progressive deceleration-recovery downshift when speed falls while throttle is low. Cornering/traction locks no longer suppress that recovery path, though airtime lock remains active.
+- These thresholds are a first correction pass and need in-game telemetry validation across cars, especially to confirm the redline override and fallback RPM estimates do not cause over-revving.

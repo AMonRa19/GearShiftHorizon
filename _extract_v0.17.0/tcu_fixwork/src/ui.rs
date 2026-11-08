@@ -31,13 +31,6 @@ impl eframe::App for TcuApp {
                 ui.heading("FH6 Virtual TCU — Rust");
                 ui.separator();
                 ui.label("Локальная панель управления");
-                ui.separator();
-                let connected = td.as_ref().map(|t| t.is_race_on != 0).unwrap_or(false);
-                let led_color = if connected { egui::Color32::from_rgb(20, 220, 120) } else { egui::Color32::from_rgb(245, 70, 88) };
-                let (led_rect, _) = ui.allocate_exact_size(egui::vec2(12.0, 12.0), egui::Sense::hover());
-                let pulse = if connected { 0.8 + ((ctx.input(|i| i.time) * 3.2).sin() as f32 + 1.0) * 0.9 } else { 5.0 };
-                ui.painter().circle_filled(led_rect.center(), pulse, led_color);
-                ui.label(if connected { "ИГРА ПОДКЛЮЧЕНА" } else { "НЕТ СВЯЗИ С FH6" });
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.add(egui::Slider::new(&mut self.ui_scale,0.80..=1.35).text("Масштаб").show_value(true));
                     ui.hyperlink_to("Открыть браузерную панель", "http://127.0.0.1:8765");
@@ -55,7 +48,7 @@ impl eframe::App for TcuApp {
                         ui.group(|ui| { ui.label("ГАЗ / ТОРМОЗ"); ui.heading(format!("{:.0}% / {:.0}%",t.throttle()*100.0,t.brake()*100.0)); });
                         ui.group(|ui| { ui.label("АВТОМОБИЛЬ"); ui.heading(format!("ID {} · {} · PI {}",t.car_ordinal,t.car_class,t.pi)); });
                     });
-                } else { self.status = "Нет связи с FH6 — ожидаю телеметрию".into(); ui.label("Ожидание телеметрии FH6…"); }
+                } else { ui.label("Ожидание телеметрии FH6…"); }
                 ui.label(&self.status);
                 ui.separator();
                 let available=ui.available_width();
@@ -90,7 +83,7 @@ impl eframe::App for TcuApp {
                             ui.horizontal(|ui| { ui.label("Режим"); egui::ComboBox::from_id_source("mode").selected_text(&c.mode).show_ui(ui,|ui|{ for m in ["Comfort","Race","Drift","Drag","Off-road"] { ui.selectable_value(&mut c.mode,m.to_string(),m); } }); });
                             ui.add(egui::Slider::new(&mut c.upshift_rpm_pct,0.5..=0.99).text("Повышение · redline"));
                             ui.add(egui::Slider::new(&mut c.downshift_rpm_pct,0.15..=0.75).text("Понижение · redline"));
-                            ui.add(egui::Slider::new(&mut c.shift_delay_ms,100..=1200).text("Задержка между переключениями · мс"));
+                            ui.label("Интервал переключения: 350 мс · оригинальный алгоритм");
                             ui.label(match c.mode.as_str() { "Drag" => "Drag: удержание передачи до высоких RPM, плавная защита от лишних переключений.", "Drift" => "Drift: быстрый отклик, более раннее понижение и меньше блокировок при контролируемом заносе.", _ => "Задержка задаёт минимальный интервал между автоматическими командами." });
                             ui.horizontal(|ui| { ui.label("Вверх"); ui.text_edit_singleline(&mut c.key_up); ui.label("Вниз"); ui.text_edit_singleline(&mut c.key_down); });
                             ui.horizontal(|ui| { ui.label("UDP"); ui.add(egui::DragValue::new(&mut c.udp_port).clamp_range(1..=65535)); ui.label("Web"); ui.add(egui::DragValue::new(&mut c.web_port).clamp_range(1..=65535)); });

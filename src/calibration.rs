@@ -1,7 +1,6 @@
 use crate::telemetry::Telemetry;
-use crate::paths;
 use serde::{Deserialize, Serialize};
-use std::{collections::BTreeMap, fs, time::{SystemTime, UNIX_EPOCH}};
+use std::{collections::BTreeMap, fs, path::Path, time::{SystemTime, UNIX_EPOCH}};
 
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
 #[serde(default)]
@@ -30,8 +29,8 @@ pub struct GraphPoint { pub time: u64, pub car_ordinal: i32, pub speed_kmh: f32,
 #[serde(default)]
 pub struct CalibrationStore { pub profiles: BTreeMap<i32, CarProfile>, pub active_car: i32, pub history: Vec<GraphPoint> }
 impl CalibrationStore {
-    pub fn load() -> Self { fs::read(paths::data_file("tcu_calibration.json")).ok().and_then(|b|serde_json::from_slice(&b).ok()).unwrap_or_default() }
-    pub fn save(&self) { if let Ok(b)=serde_json::to_vec_pretty(self) { let _=fs::write(paths::data_file("tcu_calibration.json"),b); } }
+    pub fn load() -> Self { fs::read(Path::new("tcu_calibration.json")).ok().and_then(|b|serde_json::from_slice(&b).ok()).unwrap_or_default() }
+    pub fn save(&self) { if let Ok(b)=serde_json::to_vec_pretty(self) { let _=fs::write("tcu_calibration.json",b); } }
     pub fn active(&self) -> Option<&CarProfile> { self.profiles.get(&self.active_car) }
     pub fn observe(&mut self, t:&Telemetry, previous:Option<&Telemetry>, learn_shift:bool) {
         if t.is_race_on==0 || t.car_ordinal<=0 || t.engine_max_rpm<=0.0 { return; }

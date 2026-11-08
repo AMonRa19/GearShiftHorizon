@@ -1,6 +1,9 @@
 use crate::{calibration::CarProfile, config::Config, input::ShiftCommand, telemetry::Telemetry};
 use std::time::{Duration, Instant};
 
+// Match the upstream Virtual TCU shift cooldown (Cfg.SHIFT_COOLDOWN_MS).
+const SHIFT_COOLDOWN_MS: u64 = 350;
+
 #[derive(Default)]
 pub struct Tcu {
     last_shift: Option<Instant>,
@@ -9,6 +12,7 @@ pub struct Tcu {
     pending_shift: Option<(u8, u8, Instant)>,
     last_shift_was_braking: bool,
     upshift_armed: bool,
+    last_speed_kmh: Option<f32>,
 }
 impl Tcu {
     pub fn on_telemetry_timeout(&mut self) { self.telemetry_lost = true; }
@@ -45,6 +49,7 @@ impl Tcu {
                 self.pending_shift = None;
                 self.last_shift_was_braking = false;
                 self.upshift_armed = true;
+                self.last_speed_kmh = None;
             }
         }
         self.last_timestamp = Some(td.session_timestamp);
@@ -71,9 +76,19 @@ impl Tcu {
         }
 
         let speed = td.speed_kmh();
+        let speed_falling = self.last_speed_kmh.map(|previous| previous - speed > 0.10).unwrap_or(false);
+        self.last_speed_kmh = Some(speed);
         let throttle = td.throttle();
         let brake = td.brake();
         let pct = td.rpm_pct();
+
+        // Hard redline protection: do not let corner/traction locks or a normal
+        // shift threshold keep the engine on the limiter. Pending acknowledgement
+        // still prevents repeated key pulses for the same requested shift.
+        if pct >= 0.985 && td.gear < 10 && speed > 3.0
+            && self.elapsed_since_shift() >= Duration::from_millis(120) {
+            return self.issue(td, td.gear + 1, "REDLINE OVERRIDE");
+        }
 
         // Profile presets are applied as runtime overlays; the user's base settings
         // remain intact when switching between Comfort/Race/Drift/Drag/Off-road.
@@ -84,8 +99,8 @@ impl Tcu {
                 cfg.downshift_rpm_pct.min(0.32),
                 cfg.kickdown_throttle.max(0.88),
                 cfg.kickdown_rpm_pct.min(0.48),
-                cfg.shift_delay_ms.clamp(280, 650),
-                cfg.shift_delay_ms.clamp(220, 500),
+                SHIFT_COOLDOWN_MS,
+                SHIFT_COOLDOWN_MS,
                 0.95, 0.60, true,
             ),
             "Drift" => (
@@ -93,8 +108,8 @@ impl Tcu {
                 cfg.downshift_rpm_pct.max(0.40).min(0.62),
                 cfg.kickdown_throttle.min(0.60),
                 cfg.kickdown_rpm_pct.max(0.60).min(0.76),
-                cfg.shift_delay_ms.clamp(120, 260),
-                cfg.shift_delay_ms.clamp(180, 320),
+                SHIFT_COOLDOWN_MS,
+                SHIFT_COOLDOWN_MS,
                 1.15, 0.88, false,
             ),
             "Race" => (
@@ -102,8 +117,8 @@ impl Tcu {
                 cfg.downshift_rpm_pct.max(0.28).min(0.58),
                 cfg.kickdown_throttle,
                 cfg.kickdown_rpm_pct,
-                cfg.shift_delay_ms.clamp(180, 420),
-                cfg.shift_delay_ms.clamp(180, 360),
+                SHIFT_COOLDOWN_MS,
+                SHIFT_COOLDOWN_MS,
                 0.95, 0.68, true,
             ),
             "Off-road" => (
@@ -111,8 +126,8 @@ impl Tcu {
                 cfg.downshift_rpm_pct.max(0.34).min(0.58),
                 cfg.kickdown_throttle.max(0.72),
                 cfg.kickdown_rpm_pct,
-                cfg.shift_delay_ms.clamp(300, 700),
-                cfg.shift_delay_ms.clamp(260, 520),
+                SHIFT_COOLDOWN_MS,
+                SHIFT_COOLDOWN_MS,
                 1.05, 0.78, true,
             ),
             _ => (
@@ -120,8 +135,8 @@ impl Tcu {
                 cfg.downshift_rpm_pct,
                 cfg.kickdown_throttle,
                 cfg.kickdown_rpm_pct,
-                cfg.shift_delay_ms.clamp(250, 900),
-                cfg.shift_delay_ms.clamp(220, 650),
+                SHIFT_COOLDOWN_MS,
+                SHIFT_COOLDOWN_MS,
                 0.85, 0.55, true,
             ),
         };
@@ -139,32 +154,48 @@ impl Tcu {
             && throttle < 0.25;
         // Cornering lock is for torque-driven shifts in a loaded turn. It must
         // never suppress a deliberate braking downshift on corner entry.
-        if cfg.features.cornering_lock && in_high_lateral_load && !braking_intent { return None; }
-        if cfg.features.transient_lock && td.rear_slip() > slip_limit { return None; }
+        if cfg.features.cornering_lock && in_high_lateral_load && !braking_intent && !speed_falling { return None; }
+        // Traction locks protect acceleration shifts, but must not deadlock
+        // recovery downshifts during braking or after a sudden speed loss.
+        if cfg.features.transient_lock && td.rear_slip() > slip_limit && !braking_intent && !speed_falling { return None; }
 
         // Engine braking: react to brake pedal before the car nearly stops.
         // A lower gear is allowed when predicted RPM remains below a safety
         // ceiling. If the next gear would over-rev, wait for road speed to fall
         // and re-evaluate on the next telemetry packets.
         if cfg.brake_downshift && cfg.features.engine_brake && engine_brake_enabled
-            && td.gear > 1 && speed > 8.0 && throttle < 0.25 && braking_intent {
+            && td.gear > 1 && speed > 4.0 && throttle < 0.25 && braking_intent {
             let target_gear = (td.gear - 1) as usize;
             let learned = Self::predicted_target_rpm_pct(td, profile, target_gear);
             // Conservative fallback until this car/gear has enough clean samples.
-            let target_pct = learned.unwrap_or(pct * 1.24);
+            let target_pct = learned.unwrap_or(pct * (1.28 + (td.gear.saturating_sub(2) as f32 * 0.012)));
             let rpm_ceiling = if brake > 0.75 { 0.94 } else if brake > 0.35 { 0.90 } else { 0.86 };
             // Do not wait for a high RPM threshold: at high gears the engine
             // can be well below 30% RPM while the next gear is still useful.
             // Keep only a small margin above idle to avoid an excessively low
             // target on slow approaches.
-            let idle_floor = (td.idle_rpm / td.engine_max_rpm + 0.035).clamp(0.16, 0.32);
+            let idle_floor = if learned.is_some() {
+                (td.idle_rpm / td.engine_max_rpm + 0.025).clamp(0.10, 0.25)
+            } else { 0.08 };
             let safe_to_downshift = target_pct.is_finite()
                 && target_pct >= idle_floor && target_pct <= rpm_ceiling;
             // On the approach to a corner, allow braking downshifts even under
             // longitudinal deceleration; only sustained high lateral G blocks them.
             if safe_to_downshift && (!in_high_lateral_load || brake >= 0.65)
-                && self.elapsed_since_shift() >= Duration::from_millis(brake_delay_ms.min(320)) {
+                && self.elapsed_since_shift() >= Duration::from_millis(brake_delay_ms) {
                 return self.issue(td, td.gear - 1, "ENGINE BRAKE");
+            }
+        }
+
+        // Deceleration recovery: when speed is falling while the engine is lugging,
+        // downshift progressively instead of waiting for the car to nearly stop.
+        // This path also covers collisions and coasting after a sudden speed loss.
+        if td.gear > 1 && speed > 5.0 && speed_falling && throttle < 0.35
+            && self.elapsed_since_shift() >= Duration::from_millis(SHIFT_COOLDOWN_MS) {
+            let next_pct = Self::predicted_target_rpm_pct(td, profile, (td.gear - 1) as usize)
+                .unwrap_or(pct * (1.28 + (td.gear.saturating_sub(2) as f32 * 0.012)));
+            if next_pct.is_finite() && next_pct >= 0.08 && next_pct <= 0.82 {
+                return self.issue(td, td.gear - 1, "DECELERATION RECOVERY");
             }
         }
 
@@ -178,20 +209,20 @@ impl Tcu {
         let torque_downshift_safe = next_gear_rpm.is_finite() && next_gear_rpm <= 0.92;
         if self.elapsed_since_shift() >= Duration::from_millis(normal_interval.min(360))
             && throttle >= kickdown_throttle && pct < effective_kickdown_rpm.max(0.62)
-            && td.gear > 1 && speed > 18.0 && torque_downshift_safe {
+            && td.gear > 1 && speed > 2.0 && torque_downshift_safe {
             return self.issue(td, td.gear - 1, "KICKDOWN");
         }
         if self.elapsed_since_shift() >= Duration::from_millis(normal_interval.min(420))
             && throttle > 0.52 && brake < 0.05 && pct < downshift_pct.max(0.46)
-            && td.gear > 1 && speed > 18.0 && torque_downshift_safe
+            && td.gear > 1 && speed > 2.0 && torque_downshift_safe
             && (!cfg.features.drivetrain_aware || td.rear_slip() < 0.60) {
             return self.issue(td, td.gear - 1, "TORQUE DOWN");
         }
 
-        // Stronger anti-cascade protection on upshifts prevents 7 -> 8 -> 9 -> 10
-        // in rapid succession while RPM remains above the threshold after each shift.
-        let upshift_interval = shift_delay_ms.max(900);
-        let recently_brake_shifted = self.last_shift_was_braking && self.elapsed_since_shift() < Duration::from_millis(650);
+        // The original 350 ms cooldown is shared by upshifts and downshifts.
+        // The pending-shift acknowledgement and upshift_armed latch prevent cascades.
+        let upshift_interval = shift_delay_ms;
+        let recently_brake_shifted = self.last_shift_was_braking && self.elapsed_since_shift() < Duration::from_millis(600);
         if self.upshift_armed && !recently_brake_shifted && self.elapsed_since_shift() >= Duration::from_millis(upshift_interval)
             && throttle > 0.18 && brake < 0.05 && pct > upshift_pct && td.gear < 10 {
             return self.issue(td, td.gear + 1, "UPSHIFT");
