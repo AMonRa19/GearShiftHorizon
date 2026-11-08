@@ -83,7 +83,12 @@ fn main() -> Result<()> {
         }
     })?;
 
-    let native = eframe::NativeOptions::default();
+    let native = eframe::NativeOptions {
+        viewport: egui::ViewportBuilder::default()
+            .with_inner_size([1500.0, 920.0])
+            .with_min_inner_size([980.0, 650.0]),
+        ..Default::default()
+    };
     eframe::run_native(
         "FH6 Virtual TCU — Rust",
         native,
