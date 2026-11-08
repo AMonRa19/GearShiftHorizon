@@ -1,4 +1,5 @@
 mod config;
+mod calibration;
 mod input;
 mod logic;
 pub mod telemetry;
@@ -15,7 +16,8 @@ use telemetry::Telemetry;
 fn main() -> Result<()> {
     env_logger::init();
     let cfg = Arc::new(RwLock::new(Config::load()?));
-    web::start(Arc::clone(&cfg));
+    let calibration = Arc::new(RwLock::new(calibration::CalibrationStore::load()));
+    web::start(Arc::clone(&cfg), Arc::clone(&calibration));
     let (tx, rx) = unbounded::<Telemetry>();
     let (cmd_tx, cmd_rx) = unbounded::<input::ShiftCommand>();
 
@@ -49,17 +51,32 @@ fn main() -> Result<()> {
     let cmd_logic = cmd_tx.clone();
     thread::Builder::new().name("tcu-logic".into()).spawn(move || {
         let mut tcu = logic::Tcu::default();
+        let mut previous: Option<Telemetry> = None;
+        let mut expected_tcu_gear: Option<(u8, Instant)> = None;
         let mut last = Instant::now();
         loop {
             if let Ok(td) = rx.recv_timeout(Duration::from_millis(100)) {
                 let now = Instant::now();
                 let dt = now.duration_since(last).as_secs_f32().clamp(0.001, 0.2);
                 last = now;
-                let settings = cfg_logic.read().unwrap().clone();
+                let mut settings = cfg_logic.read().unwrap().clone();
+                let observed_auto_shift = previous.as_ref().map(|prev| prev.gear != td.gear && expected_tcu_gear.map(|(target, _)| target == td.gear).unwrap_or(false)).unwrap_or(false);
+                if expected_tcu_gear.map(|(target, sent)| target == td.gear || sent.elapsed() > Duration::from_millis(1800)).unwrap_or(false) { expected_tcu_gear = None; }
+                {
+                    let mut cal = calibration.write().unwrap();
+                    cal.observe(&td, previous.as_ref(), !observed_auto_shift);
+                    if let Some(profile) = cal.active() {
+                        if profile.upshift_observations >= 3 { settings.upshift_rpm_pct = profile.upshift_rpm_pct; }
+                        if profile.downshift_observations >= 3 { settings.downshift_rpm_pct = profile.downshift_rpm_pct; }
+                    }
+                }
                 if let Some(cmd) = tcu.process(&td, &settings, dt) {
+                    expected_tcu_gear = Some((cmd.to, Instant::now()));
                     let _ = cmd_logic.send(cmd);
                 }
-                ui::publish_snapshot(td);
+                ui::publish_snapshot(td.clone());
+                ui::publish_calibration(calibration.read().unwrap().clone());
+                previous = Some(td);
             } else {
                 tcu.on_telemetry_timeout();
             }

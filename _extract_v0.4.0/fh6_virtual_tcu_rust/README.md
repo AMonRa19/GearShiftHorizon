@@ -13,12 +13,8 @@
 - Простая GUI-панель egui и сохранение настроек в `tcu_config.json`.
 
 ## Важно
-Это **первый переносимый фундамент, а не завершённый feature-for-feature клон 13.2.8**.
-В исходнике есть большие подсистемы, которые ещё предстоит перенести: точная логика
-Comfort/Race/Drift/Off-road, калибровка передаточных отношений, power curve,
-профили автомобилей и тюнинга, adaptive drive style, reverse-hold, wheelspin,
-landing recovery, web dashboard/WebSocket, replay/logger и полный набор настроек.
-Их нельзя честно объявить реализованными в этом стартовом пакете.
+Это **промежуточная Rust-реализация, а не завершённый feature-for-feature клон 13.2.8**.
+Уже добавлены базовый web dashboard, отдельные профили автокалибровки по ID машины, сбор кривой мощности, оценка отношений скорость/RPM и графики. Полный перенос исходных алгоритмов Comfort/Race/Drift/Off-road, reverse-hold, wheelspin, landing recovery, replay/logger и WebSocket ещё впереди. Не считать текущие эвристики окончательно проверенными без тестов в FH6.
 
 ## Сборка (Windows)
 1. Установить Rust stable через rustup.
@@ -51,3 +47,14 @@ landing recovery, web dashboard/WebSocket, replay/logger и полный наб�
 The Rust backend now starts a local settings page at `http://127.0.0.1:8765` alongside the desktop egui window. Both interfaces edit the same `tcu_config.json` configuration. The browser page is local-only and does not expose the controller to the LAN.
 
 The Features section includes all 11 requested switches. In this early port, the safety guards for Cornering Lock, Airtime Lock and Transient Lock, plus initial Brake Curve / Turbo Lag / Drivetrain Aware adjustments are connected to the shift decision path. The remaining switches are configuration/UI placeholders until their corresponding learning and decision algorithms are ported and tested; they are not yet feature-equivalent to Virtual TCU 13.2.8.
+
+## Автокалибровка по автомобилям
+
+Калибратор хранит отдельный профиль для каждого `car_ordinal` FH6 в `tcu_calibration.json`. При смене автомобиля активный профиль переключается автоматически. Система собирает:
+- усреднённую зависимость скорости от RPM на каждой передаче (оценка передаточного коэффициента);
+- рабочую кривую мощности по диапазонам RPM при высокой нагрузке;
+- фактические RPM-пороги переключений, наблюдаемые в телеметрии, и постепенно адаптирует пороги автоматики после накопления минимум трёх наблюдений.
+
+В desktop UI и браузере отображаются текущий автомобиль, объём выборки, обученные передачи, пороги и графики RPM/мощности. В браузере данные доступны через `GET /api/state`. Кнопка сброса очищает только профиль активного автомобиля.
+
+Важно: это начальная версия онлайн-обучения. FH6 UDP telemetry не сообщает достоверный VIN/название автомобиля, поэтому ключ профиля — `car_ordinal`. События смены передачи сейчас выводятся из последовательных телеметрических пакетов; отдельного подтверждения источника переключения (водитель или TCU) пока нет. Не считать пороги окончательно откалиброванными без проверки на нескольких машинах и сравнения логов.
