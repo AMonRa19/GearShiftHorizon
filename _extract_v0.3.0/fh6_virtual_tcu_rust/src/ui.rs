@@ -15,7 +15,8 @@ impl eframe::App for TcuApp {
         let td=SNAPSHOT.get_or_init(||Mutex::new(None)).lock().unwrap().clone();
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.heading("FH6 Virtual TCU — Rust");
-            ui.label("Начальная Rust-реализация ядра; функциональность переносится поэтапно.");
+            ui.label("Rust TCU · локальная панель управления");
+            ui.label("Браузерная панель: http://127.0.0.1:8765");
             ui.separator();
             if let Some(t)=td {
                 self.status="Телеметрия получена".into();
@@ -30,6 +31,20 @@ impl eframe::App for TcuApp {
             ui.label(&self.status);
             ui.separator();
             let mut c=self.cfg.write().unwrap();
+            ui.collapsing("FEATURES · алгоритмы", |ui| {
+                ui.checkbox(&mut c.features.cornering_lock, "Cornering Lock — блокировка переключений в повороте");
+                ui.checkbox(&mut c.features.brake_curve, "Brake Curve — адаптация по тормозу");
+                ui.checkbox(&mut c.features.shift_advisor_manual, "Shift Advisor (Manual) — подсказки ручного режима");
+                ui.checkbox(&mut c.features.power_curve_learning, "Power Curve Learning — обучение кривой мощности");
+                ui.checkbox(&mut c.features.airtime_lock, "Airtime Lock (jumps) — блокировка в воздухе");
+                ui.checkbox(&mut c.features.drive_style_adaptive, "Drive Style (adaptive) — адаптивный стиль");
+                ui.checkbox(&mut c.features.launch_control, "Launch Control — стартовый контроль");
+                ui.checkbox(&mut c.features.drivetrain_aware, "Drivetrain Aware — учёт типа привода");
+                ui.checkbox(&mut c.features.engine_brake, "Engine Brake (descents) — торможение двигателем");
+                ui.checkbox(&mut c.features.turbo_lag_compensation, "Turbo Lag Compensation — компенсация турбоямы");
+                ui.checkbox(&mut c.features.transient_lock, "Transient Lock (oversteer) — защита от резких заносов");
+            });
+            ui.separator();
             ui.checkbox(&mut c.automatic,"Автоматическое переключение");
             ui.horizontal(|ui|{
                 ui.label("Режим");
@@ -40,7 +55,7 @@ impl eframe::App for TcuApp {
             ui.horizontal(|ui| { ui.label("Повышение"); ui.add(egui::Slider::new(&mut c.upshift_rpm_pct,0.5..=0.99).suffix(" redline")); });
             ui.horizontal(|ui| { ui.label("Понижение"); ui.add(egui::Slider::new(&mut c.downshift_rpm_pct,0.15..=0.75).suffix(" redline")); });
             ui.horizontal(|ui| { ui.label("Клавиша вверх"); ui.text_edit_singleline(&mut c.key_up); ui.label("вниз"); ui.text_edit_singleline(&mut c.key_down); });
-            ui.horizontal(|ui| { ui.label("UDP порт"); ui.add(egui::DragValue::new(&mut c.udp_port).clamp_range(1..=65535)); });
+            ui.horizontal(|ui| { ui.label("UDP порт"); ui.add(egui::DragValue::new(&mut c.udp_port).clamp_range(1..=65535)); ui.label("Web порт"); ui.add(egui::DragValue::new(&mut c.web_port).clamp_range(1..=65535)); });
             if ui.button("Сохранить настройки").clicked() {
                 if let Err(e)=c.save() { self.status=format!("Ошибка сохранения: {e}"); }
                 else { self.status="Настройки сохранены".into(); }

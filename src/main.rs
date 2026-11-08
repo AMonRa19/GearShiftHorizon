@@ -3,6 +3,7 @@ mod input;
 mod logic;
 pub mod telemetry;
 mod ui;
+mod web;
 
 use anyhow::Result;
 use config::Config;
@@ -14,6 +15,7 @@ use telemetry::Telemetry;
 fn main() -> Result<()> {
     env_logger::init();
     let cfg = Arc::new(RwLock::new(Config::load()?));
+    web::start(Arc::clone(&cfg));
     let (tx, rx) = unbounded::<Telemetry>();
     let (cmd_tx, cmd_rx) = unbounded::<input::ShiftCommand>();
 

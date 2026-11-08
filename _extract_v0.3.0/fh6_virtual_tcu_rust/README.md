@@ -45,3 +45,9 @@ landing recovery, web dashboard/WebSocket, replay/logger и полный наб�
 - Временная блокировка shift проверяется по факту обработки пакетов, а не по
   UI-истории; дальнейший этап добавит подтверждение фактического изменения gear
   и повторную отправку только при доказанном отсутствии реакции игры.
+
+## Browser dashboard (new)
+
+The Rust backend now starts a local settings page at `http://127.0.0.1:8765` alongside the desktop egui window. Both interfaces edit the same `tcu_config.json` configuration. The browser page is local-only and does not expose the controller to the LAN.
+
+The Features section includes all 11 requested switches. In this early port, the safety guards for Cornering Lock, Airtime Lock and Transient Lock, plus initial Brake Curve / Turbo Lag / Drivetrain Aware adjustments are connected to the shift decision path. The remaining switches are configuration/UI placeholders until their corresponding learning and decision algorithms are ported and tested; they are not yet feature-equivalent to Virtual TCU 13.2.8.

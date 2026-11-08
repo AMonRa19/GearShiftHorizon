@@ -35,16 +35,25 @@ impl Tcu {
         let brake=td.brake();
         let pct=td.rpm_pct();
 
+        // Safety guards: avoid shifting while airborne, cornering hard or recovering from oversteer.
+        if cfg.features.airtime_lock && td.accel_z.abs() > 1.8 && speed > 35.0 { return None; }
+        if cfg.features.cornering_lock && td.accel_x.abs().max(td.accel_y.abs()) > 0.85 { return None; }
+        if cfg.features.transient_lock && td.rear_slip() > 0.55 { return None; }
+
         // Braking downshift: one gear per decision, with a rev ceiling.
-        if cfg.brake_downshift && brake>0.25 && td.gear>1 && speed>25.0 && pct<0.76 {
+        let brake_threshold = if cfg.features.brake_curve { 0.20 } else { 0.25 };
+        if cfg.brake_downshift && brake>brake_threshold && td.gear>1 && speed>25.0 && pct<0.76 {
             return self.issue(td, td.gear-1, "BRAKE DOWN");
         }
         // Kickdown: high pedal, engine below power band.
-        if throttle>=cfg.kickdown_throttle && pct<cfg.kickdown_rpm_pct && td.gear>2 && speed>25.0 {
+        let kickdown_rpm = if cfg.features.turbo_lag_compensation && td.boost_raw < 0.15 {
+            (cfg.kickdown_rpm_pct + 0.04).min(0.75)
+        } else { cfg.kickdown_rpm_pct };
+        if throttle>=cfg.kickdown_throttle && pct<kickdown_rpm && td.gear>2 && speed>25.0 {
             return self.issue(td, td.gear-1, "KICKDOWN");
         }
         // Recovery when the engine is lugging under load.
-        if throttle>0.45 && brake<0.05 && pct<cfg.downshift_rpm_pct && td.gear>2 && speed>20.0 {
+        if throttle>0.45 && brake<0.05 && pct<cfg.downshift_rpm_pct && td.gear>2 && speed>20.0 && (!cfg.features.drivetrain_aware || td.rear_slip()<0.45) {
             return self.issue(td, td.gear-1, "TORQUE DOWN");
         }
         // Upshift with hysteresis and a throttle-dependent threshold.
