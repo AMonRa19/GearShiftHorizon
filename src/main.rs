@@ -62,15 +62,16 @@ fn main() -> Result<()> {
                 let mut settings = cfg_logic.read().unwrap().clone();
                 let observed_auto_shift = previous.as_ref().map(|prev| prev.gear != td.gear && expected_tcu_gear.map(|(target, _)| target == td.gear).unwrap_or(false)).unwrap_or(false);
                 if expected_tcu_gear.map(|(target, sent)| target == td.gear || sent.elapsed() > Duration::from_millis(1800)).unwrap_or(false) { expected_tcu_gear = None; }
-                {
+                let active_profile = {
                     let mut cal = calibration.write().unwrap();
                     cal.observe(&td, previous.as_ref(), !observed_auto_shift);
                     if let Some(profile) = cal.active() {
                         if profile.upshift_observations >= 3 { settings.upshift_rpm_pct = profile.upshift_rpm_pct; }
                         if profile.downshift_observations >= 3 { settings.downshift_rpm_pct = profile.downshift_rpm_pct; }
-                    }
-                }
-                if let Some(cmd) = tcu.process(&td, &settings, dt) {
+                        Some(profile.clone())
+                    } else { None }
+                };
+                if let Some(cmd) = tcu.process(&td, &settings, dt, active_profile.as_ref()) {
                     expected_tcu_gear = Some((cmd.to, Instant::now()));
                     let _ = cmd_logic.send(cmd);
                 }

@@ -1,4 +1,4 @@
-use crate::{config::Config, input::ShiftCommand, telemetry::Telemetry};
+use crate::{calibration::CarProfile, config::Config, input::ShiftCommand, telemetry::Telemetry};
 use std::time::Instant;
 
 #[derive(Default)]
@@ -17,7 +17,7 @@ impl Tcu {
         self.last_shift=Some(Instant::now());
         Some(ShiftCommand{from:td.gear,to:target,reason})
     }
-    pub fn process(&mut self, td:&Telemetry, cfg:&Config, _dt:f32) -> Option<ShiftCommand> {
+    pub fn process(&mut self, td:&Telemetry, cfg:&Config, _dt:f32, profile:Option<&CarProfile>) -> Option<ShiftCommand> {
         // FH6 session_timestamp advances on every telemetry packet; only a
         // backwards jump indicates a restarted session/replay clock.
         if let Some(previous) = self.last_timestamp {
@@ -40,10 +40,40 @@ impl Tcu {
         if cfg.features.cornering_lock && td.accel_x.abs().max(td.accel_y.abs()) > 0.85 { return None; }
         if cfg.features.transient_lock && td.rear_slip() > 0.55 { return None; }
 
-        // Braking downshift: one gear per decision, with a rev ceiling.
-        let brake_threshold = if cfg.features.brake_curve { 0.20 } else { 0.25 };
-        if cfg.brake_downshift && brake>brake_threshold && td.gear>1 && speed>25.0 && pct<0.76 {
-            return self.issue(td, td.gear-1, "BRAKE DOWN");
+        // Braking / engine-brake strategy. Prefer the learned ratio for the
+        // target gear so we estimate post-downshift RPM at the current speed.
+        // Never downshift if the predicted RPM would approach the limiter.
+        if cfg.brake_downshift && cfg.features.engine_brake && td.gear>1 && speed>15.0
+            && throttle<0.18 {
+            let brake_threshold = if cfg.features.brake_curve { 0.12 } else { 0.20 };
+            if brake >= brake_threshold {
+                let target_gear = (td.gear - 1) as usize;
+                let predicted_pct = profile.and_then(|p| {
+                    let ratio = *p.gear_ratio.get(target_gear)?;
+                    let samples = *p.gear_samples.get(target_gear)?;
+                    if samples < 8 || !ratio.is_finite() || ratio <= 0.0001 { return None; }
+                    let predicted_rpm = td.speed_ms / ratio;
+                    let value = predicted_rpm / td.engine_max_rpm;
+                    if value.is_finite() { Some(value) } else { None }
+                });
+                // Stronger braking permits a slightly higher target RPM, but
+                // leaves margin below the limiter for telemetry/ratio error.
+                let rpm_ceiling = if brake > 0.65 { 0.90 } else if brake > 0.35 { 0.86 } else { 0.82 };
+                let rpm_floor = 0.32;
+                let safe_to_downshift = match predicted_pct {
+                    Some(target_pct) => target_pct >= rpm_floor && target_pct <= rpm_ceiling,
+                    // Until this car/gear has enough ratio samples, use a
+                    // conservative current-RPM fallback rather than guessing.
+                    None => pct < if brake > 0.65 { 0.68 } else { 0.62 },
+                };
+                let brake_cooldown = cfg.min_shift_interval_ms.min(180);
+                let ready_for_brake_shift = self.last_shift
+                    .map(|last| last.elapsed().as_millis() >= brake_cooldown as u128)
+                    .unwrap_or(true);
+                if safe_to_downshift && ready_for_brake_shift {
+                    return self.issue(td, td.gear-1, "ENGINE BRAKE");
+                }
+            }
         }
         // Kickdown: high pedal, engine below power band.
         let kickdown_rpm = if cfg.features.turbo_lag_compensation && td.boost_raw < 0.15 {
