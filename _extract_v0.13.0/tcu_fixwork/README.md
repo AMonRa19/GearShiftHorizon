@@ -103,8 +103,6 @@ The current control logic uses the corrected per-gear calibration ratio (engine 
 After updating, allow the car to collect clean steady-speed samples again. Calibration files are kept, but old inverse-ratio samples are discarded per gear when new valid samples arrive.
 
 
-## Портирование алгоритма выбора передачи (текущий этап)
-- Тормозное понижение использует прогноз скорости после начала замедления, выбирает целевую передачу по обученным RPM/скорость коэффициентам и дополнительно проверяет обороты на фактической скорости. При недостатке калибровки остаётся только консервативное понижение на одну ступень.
-- Kickdown и torque recovery могут выбирать не только следующую, но и более подходящую нижнюю передачу по измеренной кривой мощности и per-gear коэффициентам. Добавлена защита от выбора передачи, которая почти сразу потребовала бы повышения.
-- Клавиатурный исполнитель уже поддерживает последовательность нажатий для перехода к целевой передаче; логика подтверждения удерживает команду, пока телеметрия проходит промежуточные передачи.
-- Это частичный перенос алгоритмов оригинала, а не полный feature parity. Сборка и тесты этой рабочей копии пока не подтверждены: в текущей среде отсутствуют `cargo` и `rustc`. Перед использованием обязательно собрать `cargo test` и проверить переключения в FH6 на безопасном участке.
+## Shift timing parity with upstream
+
+Automatic shift cooldown is fixed at 350 ms, matching `Cfg.SHIFT_COOLDOWN_MS` in the upstream Forza-Love Virtual TCU. The same cooldown applies to upshifts, torque downshifts, and braking downshifts; the pending-shift acknowledgement still prevents repeated commands while the game has not confirmed a gear change. Key hold/gap timing remains separate.
