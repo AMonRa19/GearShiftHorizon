@@ -1,9 +1,6 @@
 use crate::{calibration::CarProfile, config::Config, input::ShiftCommand, telemetry::Telemetry};
 use std::time::{Duration, Instant};
 
-// Match the upstream Virtual TCU shift cooldown (Cfg.SHIFT_COOLDOWN_MS).
-const SHIFT_COOLDOWN_MS: u64 = 350;
-
 #[derive(Default)]
 pub struct Tcu {
     last_shift: Option<Instant>,
@@ -87,8 +84,8 @@ impl Tcu {
                 cfg.downshift_rpm_pct.min(0.32),
                 cfg.kickdown_throttle.max(0.88),
                 cfg.kickdown_rpm_pct.min(0.48),
-                SHIFT_COOLDOWN_MS,
-                SHIFT_COOLDOWN_MS,
+                cfg.shift_delay_ms.clamp(280, 650),
+                cfg.shift_delay_ms.clamp(220, 500),
                 0.95, 0.60, true,
             ),
             "Drift" => (
@@ -96,8 +93,8 @@ impl Tcu {
                 cfg.downshift_rpm_pct.max(0.40).min(0.62),
                 cfg.kickdown_throttle.min(0.60),
                 cfg.kickdown_rpm_pct.max(0.60).min(0.76),
-                SHIFT_COOLDOWN_MS,
-                SHIFT_COOLDOWN_MS,
+                cfg.shift_delay_ms.clamp(120, 260),
+                cfg.shift_delay_ms.clamp(180, 320),
                 1.15, 0.88, false,
             ),
             "Race" => (
@@ -105,8 +102,8 @@ impl Tcu {
                 cfg.downshift_rpm_pct.max(0.28).min(0.58),
                 cfg.kickdown_throttle,
                 cfg.kickdown_rpm_pct,
-                SHIFT_COOLDOWN_MS,
-                SHIFT_COOLDOWN_MS,
+                cfg.shift_delay_ms.clamp(180, 420),
+                cfg.shift_delay_ms.clamp(180, 360),
                 0.95, 0.68, true,
             ),
             "Off-road" => (
@@ -114,8 +111,8 @@ impl Tcu {
                 cfg.downshift_rpm_pct.max(0.34).min(0.58),
                 cfg.kickdown_throttle.max(0.72),
                 cfg.kickdown_rpm_pct,
-                SHIFT_COOLDOWN_MS,
-                SHIFT_COOLDOWN_MS,
+                cfg.shift_delay_ms.clamp(300, 700),
+                cfg.shift_delay_ms.clamp(260, 520),
                 1.05, 0.78, true,
             ),
             _ => (
@@ -123,8 +120,8 @@ impl Tcu {
                 cfg.downshift_rpm_pct,
                 cfg.kickdown_throttle,
                 cfg.kickdown_rpm_pct,
-                SHIFT_COOLDOWN_MS,
-                SHIFT_COOLDOWN_MS,
+                cfg.shift_delay_ms.clamp(250, 900),
+                cfg.shift_delay_ms.clamp(220, 650),
                 0.85, 0.55, true,
             ),
         };
@@ -166,7 +163,7 @@ impl Tcu {
             // On the approach to a corner, allow braking downshifts even under
             // longitudinal deceleration; only sustained high lateral G blocks them.
             if safe_to_downshift && (!in_high_lateral_load || brake >= 0.65)
-                && self.elapsed_since_shift() >= Duration::from_millis(brake_delay_ms) {
+                && self.elapsed_since_shift() >= Duration::from_millis(brake_delay_ms.min(320)) {
                 return self.issue(td, td.gear - 1, "ENGINE BRAKE");
             }
         }
@@ -191,10 +188,10 @@ impl Tcu {
             return self.issue(td, td.gear - 1, "TORQUE DOWN");
         }
 
-        // The original 350 ms cooldown is shared by upshifts and downshifts.
-        // The pending-shift acknowledgement and upshift_armed latch prevent cascades.
-        let upshift_interval = shift_delay_ms;
-        let recently_brake_shifted = self.last_shift_was_braking && self.elapsed_since_shift() < Duration::from_millis(600);
+        // Stronger anti-cascade protection on upshifts prevents 7 -> 8 -> 9 -> 10
+        // in rapid succession while RPM remains above the threshold after each shift.
+        let upshift_interval = shift_delay_ms.max(900);
+        let recently_brake_shifted = self.last_shift_was_braking && self.elapsed_since_shift() < Duration::from_millis(650);
         if self.upshift_armed && !recently_brake_shifted && self.elapsed_since_shift() >= Duration::from_millis(upshift_interval)
             && throttle > 0.18 && brake < 0.05 && pct > upshift_pct && td.gear < 10 {
             return self.issue(td, td.gear + 1, "UPSHIFT");

@@ -83,7 +83,7 @@ impl eframe::App for TcuApp {
                             ui.horizontal(|ui| { ui.label("Режим"); egui::ComboBox::from_id_source("mode").selected_text(&c.mode).show_ui(ui,|ui|{ for m in ["Comfort","Race","Drift","Drag","Off-road"] { ui.selectable_value(&mut c.mode,m.to_string(),m); } }); });
                             ui.add(egui::Slider::new(&mut c.upshift_rpm_pct,0.5..=0.99).text("Повышение · redline"));
                             ui.add(egui::Slider::new(&mut c.downshift_rpm_pct,0.15..=0.75).text("Понижение · redline"));
-                            ui.label("Интервал переключения: 350 мс · оригинальный алгоритм");
+                            ui.add(egui::Slider::new(&mut c.shift_delay_ms,100..=1200).text("Задержка между переключениями · мс"));
                             ui.label(match c.mode.as_str() { "Drag" => "Drag: удержание передачи до высоких RPM, плавная защита от лишних переключений.", "Drift" => "Drift: быстрый отклик, более раннее понижение и меньше блокировок при контролируемом заносе.", _ => "Задержка задаёт минимальный интервал между автоматическими командами." });
                             ui.horizontal(|ui| { ui.label("Вверх"); ui.text_edit_singleline(&mut c.key_up); ui.label("Вниз"); ui.text_edit_singleline(&mut c.key_down); });
                             ui.horizontal(|ui| { ui.label("UDP"); ui.add(egui::DragValue::new(&mut c.udp_port).clamp_range(1..=65535)); ui.label("Web"); ui.add(egui::DragValue::new(&mut c.web_port).clamp_range(1..=65535)); });

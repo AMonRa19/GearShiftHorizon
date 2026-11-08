@@ -4,9 +4,6 @@ use log::{error, info};
 use rdev::{simulate, EventType, Key};
 use std::{sync::{Arc,RwLock}, thread, time::Duration};
 
-// Upstream Virtual TCU KEY_HOLD_S = 0.04 seconds.
-const KEY_HOLD_MS: u64 = 40;
-
 #[derive(Clone, Debug)]
 pub struct ShiftCommand { pub from: u8, pub to: u8, pub reason: &'static str }
 
@@ -31,7 +28,7 @@ pub fn run_keyboard_worker(rx: Receiver<ShiftCommand>, cfg: Arc<RwLock<Config>>)
         let count=cmd.to.abs_diff(cmd.from);
         for _ in 0..count {
             if let Err(e)=key_event(k,true) { error!("Key down failed: {e}"); break; }
-            thread::sleep(Duration::from_millis(KEY_HOLD_MS));
+            thread::sleep(Duration::from_millis(c.shift_hold_ms));
             if let Err(e)=key_event(k,false) { error!("Key release failed: {e}"); break; }
             thread::sleep(Duration::from_millis(c.shift_gap_ms));
         }
