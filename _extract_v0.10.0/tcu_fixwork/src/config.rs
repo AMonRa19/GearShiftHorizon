@@ -42,6 +42,8 @@ pub struct Config {
     pub kickdown_throttle: f32,
     pub kickdown_rpm_pct: f32,
     pub min_shift_interval_ms: u64,
+    /// User-adjustable delay between automatic shift commands.
+    pub shift_delay_ms: u64,
     pub web_port: u16,
     pub features: Features,
 }
@@ -50,7 +52,7 @@ impl Default for Config {
         Self { udp_port:5555, key_up:"e".into(), key_down:"q".into(),
             shift_hold_ms:65, shift_gap_ms:60, mode:"Race".into(), automatic:true,
             upshift_rpm_pct:0.90, downshift_rpm_pct:0.38, brake_downshift:true,
-            kickdown_throttle:0.78, kickdown_rpm_pct:0.58, min_shift_interval_ms:300, web_port:8765, features:Features::default() }
+            kickdown_throttle:0.78, kickdown_rpm_pct:0.58, min_shift_interval_ms:300, shift_delay_ms:300, web_port:8765, features:Features::default() }
     }
 }
 impl Config {
