@@ -24,7 +24,7 @@ class Tachometer(QWidget):
         self.rpm = 0
         self.gear = 0
         self.speed = 0.0
-        self.setMinimumSize(180, 120)
+        self.setMinimumSize(120, 80)
 
     def set_values(self, frame) -> None:
         if frame:
@@ -106,7 +106,8 @@ class HudWindow(QWidget):
             self.state_label.setText(f"{analysis.state.value}  ·  {analysis.confidence:.0%}")
             self.detail.setText(
                 f"Газ {analysis.throttle:.0%}  Тормоз {analysis.brake:.0%}  "
-                f"Slip {analysis.max_wheel_slip:.2f}"
+                f"Slip {analysis.max_wheel_slip:.2f}  "
+                f"{frame.power_w / 1000:.0f} kW · {frame.torque_nm:.0f} Nm"
             )
         else:
             self.state_label.setText("НЕТ ТЕЛЕМЕТРИИ")
