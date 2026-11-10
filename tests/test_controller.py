@@ -56,3 +56,15 @@ def test_routine_shifts_are_blocked_during_impact_recovery():
     )
     assert result.requested_gear is None
     assert result.blocked_by == "IMPACT"
+
+
+def test_upshift_uses_conservative_one_step_fallback_before_calibration():
+    result = ShiftController().evaluate(
+        frame(rpm=8300, gear=4),
+        VehicleAnalysis(state=VehicleState.ACCELERATING, speed_kmh=108,
+                        throttle=0.95, longitudinal_accel_mps2=1.0),
+        None,
+    )
+    assert result.direction == "UP"
+    assert result.requested_gear == 5
+    assert "FALLBACK" in result.reason
