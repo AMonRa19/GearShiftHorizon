@@ -265,10 +265,10 @@ class MainWindow(QMainWindow):
     def update_snapshot(self, frame, analysis, decision, connected: bool, profile=None) -> None:
         if frame:
             self.car_label.setText(
-                f"Автомобиль ID {profile.car_ordinal} · класс {profile.car_class} · "
-                f"PI {profile.pi} · привод {profile.drivetrain} · "
+                f"Автомобиль ID {profile.car_ordinal} · класс {frame.car_class_label} "
+                f"(Data Out {profile.car_class}) · PI {profile.pi} · привод {profile.drivetrain} · "
                 f"обучено передач: {sum(1 for n in profile.gear_samples.values() if n >= 30)}"
-                if profile else f"Автомобиль ID {frame.car_ordinal} · класс {frame.car_class} · PI {frame.pi}"
+                if profile else f"Автомобиль ID {frame.car_ordinal} · класс {frame.car_class_label} · PI {frame.pi}"
             )
             self.metric_labels["speed"].setText(f"{frame.speed_kmh:.0f} km/h")
             self.metric_labels["rpm"].setText(f"{frame.rpm:,.0f}")
