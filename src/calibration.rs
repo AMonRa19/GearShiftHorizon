@@ -87,6 +87,7 @@ impl CarProfile {
         let current_pct = (current_rpm / engine_max_rpm).clamp(0.10, 1.05);
         let next_pct = next_rpm / engine_max_rpm;
         if !next_pct.is_finite() || !(0.22..=0.94).contains(&next_pct) { return None; }
+        if self.power_curve.iter().filter(|p| p.samples >= 12 && p.power_kw.is_finite() && p.power_kw > 0.0).count() < 3 { return None; }
         let current_power = self.estimated_power_kw(current_pct)?;
         let next_power = self.estimated_power_kw(next_pct)?;
         let current_omega = current_rpm * std::f32::consts::TAU / 60.0;
@@ -144,6 +145,12 @@ impl CalibrationStore {
         {
             let p=self.profiles.entry(t.car_ordinal).or_insert_with(||CarProfile{car_ordinal:t.car_ordinal,..CarProfile::default()});
             p.car_class=t.car_class; p.pi=t.pi; p.drivetrain=t.drivetrain; p.samples+=1;
+            // Learn the per-car maximum RPM reported by FH telemetry using a smoothed estimate.
+            if t.engine_max_rpm.is_finite() && (3000.0..=20000.0).contains(&t.engine_max_rpm) {
+                let n = p.redline_observations;
+                p.learned_redline_rpm = if n == 0 { t.engine_max_rpm } else { p.learned_redline_rpm * 0.92 + t.engine_max_rpm * 0.08 };
+                p.redline_observations = n.saturating_add(1);
+            }
             p.last_seen_unix=SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
             let gear=t.gear as usize;
             let stable_gear = previous.map(|prev| prev.car_ordinal == t.car_ordinal && prev.gear == t.gear).unwrap_or(false);
