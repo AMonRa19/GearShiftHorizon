@@ -13,7 +13,7 @@ fn is_newer_timestamp(candidate: u32, current: u32) -> bool {
 
 use anyhow::Result;
 use config::Config;
-use crossbeam_channel::{unbounded, TryRecvError};
+use crossbeam_channel::{bounded, unbounded, TryRecvError};
 use log::{error, info};
 use std::{net::UdpSocket, sync::{Arc, RwLock}, thread, time::{Duration, Instant}};
 use telemetry::Telemetry;
@@ -24,7 +24,7 @@ fn main() -> Result<()> {
     let calibration = Arc::new(RwLock::new(calibration::CalibrationStore::load()));
     web::start(Arc::clone(&cfg), Arc::clone(&calibration));
     let (tx, rx) = unbounded::<Telemetry>();
-    let (cmd_tx, cmd_rx) = unbounded::<input::ShiftCommand>();
+    let (cmd_tx, cmd_rx) = bounded::<input::ShiftCommand>(1);
 
     let cfg_net = Arc::clone(&cfg);
     thread::Builder::new().name("fh6-udp".into()).spawn(move || {
@@ -101,7 +101,9 @@ fn main() -> Result<()> {
             if let Some(cmd) = tcu.process(&td, &settings, dt, active_profile.as_ref()) {
                 info!("TCU shift {} -> {} | {} | {:.0} RPM | {:.1} km/h", cmd.from, cmd.to, cmd.reason, td.current_rpm, td.speed_kmh());
                 expected_tcu_gear = Some((cmd.to, Instant::now()));
-                let _ = cmd_logic.send(cmd);
+                if let Err(e) = cmd_logic.send_timeout(cmd, Duration::from_millis(25)) {
+                    error!("Не удалось передать команду переключения в клавиатурный поток: {}", e);
+                }
             }
             ui::publish_snapshot(td.clone());
             ui_calibration_counter = ui_calibration_counter.wrapping_add(1);
