@@ -115,7 +115,8 @@ class ApplicationController(QObject):
 
         if self.automatic and decision.requested_gear and decision.direction in ("UP", "DOWN"):
             try:
-                self.keyboard.shift(decision.direction)
+                self.keyboard.shift(decision.direction,
+                                    abs(decision.requested_gear - frame.gear))
                 self.shift.confirm_sent(decision.requested_gear)
                 LOG.info("Shift %s -> gear %s: %s", decision.direction,
                          decision.requested_gear, decision.reason)
