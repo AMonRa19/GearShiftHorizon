@@ -23,7 +23,7 @@ jobs:
       - name: Run tests
         run: pytest
       - name: Build Windows executable
-        run: pyinstaller --noconfirm --clean --windowed --name GearShiftHorizon gearshift/app.py
+        run: pyinstaller --noconfirm --clean --windowed --name GearShiftHorizon run.py
       - name: Upload executable
         uses: actions/upload-artifact@v4
         with:
