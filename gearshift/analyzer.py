@@ -47,8 +47,10 @@ class VehicleStateAnalyzer:
         sliding = slip >= 0.28
         impact = (frame.smashable_vel_diff >= 1.5 and frame.smashable_mass > 0.0
                   and delta <= -0.8)
-        airborne_candidate = (speed > 20.0 and
-                              all(value <= 0.035 for value in frame.normalized_suspension_travel))
+        airborne_candidate = (
+            speed > 20.0 and frame.normalized_suspension_travel is not None
+            and all(value <= 0.035 for value in frame.normalized_suspension_travel)
+        )
         accelerating = (accel is not None and accel > 0.65 and delta > 0.08
                         and frame.throttle > 0.12)
         genuinely_braking = (accel is not None and accel < -0.75 and delta < -0.08)
