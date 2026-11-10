@@ -77,6 +77,7 @@ class ApplicationController(QObject):
         self.last_analysis: VehicleAnalysis | None = None
         self.last_decision: ShiftDecision | None = None
         self.last_profile = None
+        self._frames_since_save = 0
         self.automatic = False
         self.worker_thread = QThread()
         self.worker = TelemetryWorker()
@@ -112,6 +113,11 @@ class ApplicationController(QObject):
         decision = self.shift.evaluate(frame, analysis, profile)
         self.last_frame, self.last_analysis, self.last_decision = frame, analysis, decision
         self.last_profile = profile
+        if frame.race_on:
+            self._frames_since_save += 1
+            if self._frames_since_save >= 600:
+                self.calibration.save()
+                self._frames_since_save = 0
 
         if self.automatic and decision.requested_gear and decision.direction in ("UP", "DOWN"):
             try:
