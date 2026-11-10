@@ -21,6 +21,11 @@ class KeyboardOutput:
         vk = _KEY_UP if direction == "UP" else _KEY_DOWN
         count = max(1, min(10, int(count)))
         user32 = ctypes.WinDLL("user32", use_last_error=True)
+        foreground = user32.GetForegroundWindow()
+        title = ctypes.create_unicode_buffer(512)
+        user32.GetWindowTextW(foreground, title, len(title))
+        if "forza" not in title.value.lower():
+            raise OSError("Forza must be the active foreground window before shifting")
 
         class KEYBDINPUT(ctypes.Structure):
             _fields_ = [("wVk", ctypes.c_ushort), ("wScan", ctypes.c_ushort),
