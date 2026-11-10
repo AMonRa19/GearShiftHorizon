@@ -137,8 +137,13 @@ class ShiftController:
                     next_power = profile.estimated_power_kw(predicted / frame.engine_max_rpm)
                     if current_power is None or next_power is None or next_power >= current_power * 0.98:
                         return self._decision(up_target, "LEARNED UPSHIFT MODEL", predicted, 0.72)
-            return ShiftDecision(reason="Upshift threshold reached; waiting for a validated next-gear model",
-                                 blocked_by="INSUFFICIENT_CALIBRATION")
+            if up_target <= c.max_gear and (not profile or not up_ratio
+                    or profile.gear_samples.get(up_target, 0) < 30):
+                return ShiftDecision(requested_gear=up_target, direction="UP",
+                                     reason="RPM THRESHOLD FALLBACK · per-car ratio still learning",
+                                     confidence=0.35)
+            return ShiftDecision(reason="Power model indicates holding the current gear until redline guard",
+                                 blocked_by="POWER_MODEL_HOLD")
         return ShiftDecision(reason="Current gear remains appropriate")
 
     @staticmethod
