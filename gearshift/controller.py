@@ -105,12 +105,34 @@ class ShiftController:
                 if predicted and frame.idle_rpm * 1.15 < predicted < frame.engine_max_rpm * 0.88:
                     return self._decision(down_target, "MEASURED BRAKING + SAFE RPM", predicted, 0.75)
 
+        # Kickdown is based on a real acceleration request and a validated target
+        # gear model. Select the strongest estimated power point below the RPM ceiling.
+        if (analysis.state == VehicleState.ACCELERATING and frame.throttle > 0.82
+                and frame.rpm_pct < c.downshift_rpm_pct and frame.gear > 1 and profile):
+            candidates = []
+            for target in range(1, frame.gear):
+                ratio = profile.gear_ratio_rpm_per_mps.get(target)
+                if profile.gear_samples.get(target, 0) < 30:
+                    continue
+                predicted = self._predict_rpm(frame, ratio)
+                if predicted is None or not (frame.idle_rpm * 1.2 < predicted < frame.engine_max_rpm * 0.88):
+                    continue
+                power = profile.estimated_power_kw(predicted / frame.engine_max_rpm)
+                candidates.append((power if power is not None else predicted, target, predicted, power is not None))
+            if candidates:
+                _, target, predicted, power_valid = max(candidates, key=lambda item: item[0])
+                return self._decision(target, "POWER-MODEL KICKDOWN" if power_valid else "SAFE-RPM KICKDOWN",
+                                      predicted, 0.78 if power_valid else 0.58)
+
         if (analysis.state == VehicleState.ACCELERATING and frame.throttle > 0.72
                 and frame.rpm_pct >= c.upshift_rpm_pct):
             if up_ratio and profile and profile.gear_samples.get(up_target, 0) >= 30:
                 predicted = self._predict_rpm(frame, up_ratio)
                 if predicted and frame.idle_rpm * 1.2 < predicted < frame.engine_max_rpm * 0.94:
-                    return self._decision(up_target, "LEARNED UPSHIFT MODEL", predicted, 0.7)
+                    current_power = profile.estimated_power_kw(frame.rpm_pct)
+                    next_power = profile.estimated_power_kw(predicted / frame.engine_max_rpm)
+                    if current_power is None or next_power is None or next_power >= current_power * 0.98:
+                        return self._decision(up_target, "LEARNED UPSHIFT MODEL", predicted, 0.72)
             return ShiftDecision(reason="Upshift threshold reached; waiting for a validated next-gear model",
                                  blocked_by="INSUFFICIENT_CALIBRATION")
         return ShiftDecision(reason="Current gear remains appropriate")
