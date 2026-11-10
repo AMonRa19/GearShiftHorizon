@@ -108,7 +108,6 @@ impl Tcu {
             return None;
         }
 
-        let speed = td.speed_kmh();
         let speed_delta = self.last_speed_kmh.map(|previous| previous - speed);
         let speed_dt = self.last_speed_timestamp.map(|previous| td.session_timestamp.wrapping_sub(previous) as f32 / 1000.0);
         let decel_ms2 = match (speed_delta, speed_dt) {
