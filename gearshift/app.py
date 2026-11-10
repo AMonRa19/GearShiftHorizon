@@ -68,6 +68,7 @@ class ApplicationController(QObject):
         self.last_frame: TelemetryFrame | None = None
         self.last_analysis: VehicleAnalysis | None = None
         self.last_decision: ShiftDecision | None = None
+        self.last_profile = None
         self.automatic = False
         self.worker_thread = QThread()
         self.worker = TelemetryWorker()
@@ -96,6 +97,7 @@ class ApplicationController(QObject):
         profile = self.calibration.observe(frame, analysis.state.value)
         decision = self.shift.evaluate(frame, analysis, profile)
         self.last_frame, self.last_analysis, self.last_decision = frame, analysis, decision
+        self.last_profile = profile
 
         if self.automatic and decision.requested_gear and decision.direction in ("UP", "DOWN"):
             try:
@@ -131,7 +133,8 @@ class ApplicationController(QObject):
         frame = self.last_frame if connected else None
         analysis = self.last_analysis if connected else None
         decision = self.last_decision if connected else None
-        self.window.update_snapshot(frame, analysis, decision, connected)
+        self.window.update_snapshot(frame, analysis, decision, connected,
+                                    self.last_profile if connected else None)
         self.hud.update_data(frame, analysis, decision)
 
     def shutdown(self) -> None:
