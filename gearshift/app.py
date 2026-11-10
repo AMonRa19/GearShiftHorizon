@@ -99,8 +99,12 @@ class ApplicationController(QObject):
         if self.last_frame and frame.timestamp_ms == self.last_frame.timestamp_ms:
             return
         if self.last_frame and frame.timestamp_ms < self.last_frame.timestamp_ms:
-            if self.last_frame.timestamp_ms - frame.timestamp_ms < 0x80000000:
+            backwards_ms = self.last_frame.timestamp_ms - frame.timestamp_ms
+            if backwards_ms < 0x80000000 and backwards_ms <= 5000:
                 return
+            # A large backward jump is treated as a new telemetry session.
+            self.analyzer.reset()
+            self.shift.cancel_pending()
         if self.last_frame and (
             self.last_frame.car_ordinal != frame.car_ordinal
             or self.last_frame.race_on != frame.race_on
