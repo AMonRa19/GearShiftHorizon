@@ -24,6 +24,28 @@ class CarProfile:
         learned = sum(1 for n in self.gear_samples.values() if n >= 30)
         return min(1.0, learned / 6.0)
 
+    def estimated_power_kw(self, rpm_pct: float) -> float | None:
+        """Interpolate only across buckets with enough real telemetry samples."""
+        points = []
+        for bucket, samples in self.power_curve.items():
+            if len(samples) >= 12:
+                values = [v for v in samples if v > 0]
+                if values:
+                    points.append((bucket / 20.0, sum(values) / len(values)))
+        points.sort()
+        if len(points) < 3:
+            return None
+        x = max(0.0, min(1.05, rpm_pct))
+        if x <= points[0][0]:
+            return points[0][1]
+        if x >= points[-1][0]:
+            return points[-1][1]
+        for (x0, y0), (x1, y1) in zip(points, points[1:]):
+            if x0 <= x <= x1:
+                fraction = (x - x0) / max(0.001, x1 - x0)
+                return y0 + (y1 - y0) * fraction
+        return None
+
 
 class CalibrationStore:
     def __init__(self, path: str = "tcu_calibration.json") -> None:
