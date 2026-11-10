@@ -106,7 +106,7 @@ class HudWindow(QWidget):
             self.state_label.setText(f"{analysis.state.value}  ·  {analysis.confidence:.0%}")
             self.detail.setText(
                 f"Газ {analysis.throttle:.0%}  Тормоз {analysis.brake:.0%}  "
-                f"Slip {analysis.max_wheel_slip:.2f}  Lat {analysis.lateral_g:+.2f} G  "
+                f"Slip {analysis.max_wheel_slip:.2f}  Lat {analysis.lateral_accel_raw:+.2f} raw  "
                 f"Steer {analysis.steering_input:+.0%}  "
                 f"{frame.power_w / 1000:.0f} kW · {frame.torque_nm:.0f} Nm  "
                 f"Boost {frame.boost_raw:.1f} PSI"
