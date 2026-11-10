@@ -42,9 +42,13 @@ class VehicleStateAnalyzer:
                                     else self._filtered_accel * 0.65 + raw_accel * 0.35)
         accel = self._filtered_accel
 
-        slip = frame.max_abs_slip
+        slip = max(frame.max_abs_slip, frame.max_abs_combined_slip)
         stopped = speed < 2.0
         sliding = slip >= 0.28
+        impact = (frame.smashable_vel_diff >= 1.5 and frame.smashable_mass > 0.0
+                  and delta <= -0.8)
+        airborne_candidate = (speed > 20.0 and
+                              all(value <= 0.035 for value in frame.normalized_suspension_travel))
         accelerating = (accel is not None and accel > 0.65 and delta > 0.08
                         and frame.throttle > 0.12)
         genuinely_braking = (accel is not None and accel < -0.75 and delta < -0.08)
@@ -52,8 +56,13 @@ class VehicleStateAnalyzer:
 
         if not frame.race_on:
             target, confidence, reason = VehicleState.UNKNOWN, 0.0, "Race telemetry inactive"
+        elif impact:
+            target, confidence = VehicleState.IMPACT, min(0.99, 0.65 + frame.smashable_vel_diff / 10)
+            reason = f"Collision telemetry: velocity loss {frame.smashable_vel_diff:.1f} m/s"
         elif stopped:
             target, confidence, reason = VehicleState.STOPPED, 0.98, "Vehicle speed is near zero"
+        elif airborne_candidate:
+            target, confidence, reason = VehicleState.AIRBORNE, 0.72, "All four suspension sensors indicate near-full extension"
         elif sliding:
             target, confidence = VehicleState.SLIDING, min(0.95, 0.55 + slip)
             reason = "Wheel-slip telemetry exceeds threshold"
@@ -63,8 +72,9 @@ class VehicleStateAnalyzer:
         elif accelerating:
             target, confidence = VehicleState.ACCELERATING, min(0.95, 0.55 + (accel or 0) / 8)
             reason = "Measured speed is increasing under throttle"
-        elif self._state in (VehicleState.SLIDING, VehicleState.BRAKING) and coasting:
-            target, confidence, reason = VehicleState.RECOVERING, 0.68, "Speed and slip are stabilizing"
+        elif self._state in (VehicleState.SLIDING, VehicleState.BRAKING, VehicleState.IMPACT,
+                             VehicleState.AIRBORNE) and coasting and slip < 0.18:
+            target, confidence, reason = VehicleState.RECOVERING, 0.68, "Speed, slip and suspension are stabilizing"
         elif coasting:
             target, confidence, reason = VehicleState.CRUISING, 0.72, "Speed is relatively stable"
         else:
@@ -72,7 +82,7 @@ class VehicleStateAnalyzer:
 
         # Severe events react immediately; routine transitions need two consecutive
         # frames of evidence to prevent state flicker from packet noise.
-        immediate = (target == VehicleState.UNKNOWN or target == VehicleState.STOPPED
+        immediate = (target in (VehicleState.UNKNOWN, VehicleState.STOPPED, VehicleState.IMPACT)
                      or (target == VehicleState.SLIDING and slip >= 0.45)
                      or (target == VehicleState.BRAKING and abs(accel or 0) >= 3.0))
         if target == self._state:
@@ -102,6 +112,9 @@ class VehicleStateAnalyzer:
             brake=frame.brake,
             max_wheel_slip=slip,
             rpm_pct=frame.rpm_pct,
+            lateral_g=frame.lateral_g_estimate,
+            smashable_vel_diff=frame.smashable_vel_diff,
+            steering_input=frame.steer / 127.0,
             state_duration_s=max(0.0, now - self._state_since),
             reason=reason if state == target else f"Transition filter: {state.value}",
             updated_at=now,
