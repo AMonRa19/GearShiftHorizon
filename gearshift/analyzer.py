@@ -7,32 +7,40 @@ from .models import TelemetryFrame, VehicleAnalysis, VehicleState
 
 
 class VehicleStateAnalyzer:
-    """Classifies motion from a time series, not from pedal input alone."""
+    """Classifies vehicle motion from filtered time-series evidence."""
 
     def __init__(self) -> None:
         self._samples: deque[tuple[float, float]] = deque(maxlen=12)
         self._state = VehicleState.UNKNOWN
         self._state_since = monotonic()
-        self._sliding_since: float | None = None
-        self._last_race_on = False
-        self._analysis = VehicleAnalysis()
+        self._candidate: VehicleState | None = None
+        self._candidate_count = 0
+        self._filtered_accel: float | None = None
 
     def reset(self) -> None:
         self._samples.clear()
         self._state = VehicleState.UNKNOWN
         self._state_since = monotonic()
-        self._sliding_since = None
-        self._last_race_on = False
-        self._analysis = VehicleAnalysis()
+        self._candidate = None
+        self._candidate_count = 0
+        self._filtered_accel = None
 
     def update(self, frame: TelemetryFrame) -> VehicleAnalysis:
         now = frame.received_at
         speed = max(0.0, frame.speed_kmh)
         self._samples.append((now, speed))
-        previous = self._samples[-2] if len(self._samples) >= 2 else None
-        dt = max(0.001, now - previous[0]) if previous else None
+
+        # Compare against a short multi-frame baseline to reduce one-packet noise.
+        previous = self._samples[-4] if len(self._samples) >= 4 else (
+            self._samples[-2] if len(self._samples) >= 2 else None
+        )
+        dt = max(0.01, now - previous[0]) if previous else None
         delta = speed - previous[1] if previous else 0.0
-        accel = (delta / 3.6) / dt if dt else None
+        raw_accel = (delta / 3.6) / dt if dt else None
+        if raw_accel is not None:
+            self._filtered_accel = (raw_accel if self._filtered_accel is None
+                                    else self._filtered_accel * 0.65 + raw_accel * 0.35)
+        accel = self._filtered_accel
 
         slip = frame.max_abs_slip
         stopped = speed < 2.0
@@ -40,14 +48,15 @@ class VehicleStateAnalyzer:
         accelerating = (accel is not None and accel > 0.65 and delta > 0.08
                         and frame.throttle > 0.12)
         genuinely_braking = (accel is not None and accel < -0.75 and delta < -0.08)
-        coasting = (accel is not None and abs(accel) < 0.45)
+        coasting = accel is not None and abs(accel) < 0.45
 
         if not frame.race_on:
             target, confidence, reason = VehicleState.UNKNOWN, 0.0, "Race telemetry inactive"
         elif stopped:
             target, confidence, reason = VehicleState.STOPPED, 0.98, "Vehicle speed is near zero"
         elif sliding:
-            target, confidence, reason = VehicleState.SLIDING, min(0.95, 0.55 + slip), "Wheel-slip telemetry exceeds threshold"
+            target, confidence = VehicleState.SLIDING, min(0.95, 0.55 + slip)
+            reason = "Wheel-slip telemetry exceeds threshold"
         elif genuinely_braking:
             target, confidence = VehicleState.BRAKING, min(0.95, 0.55 + abs(accel or 0) / 8)
             reason = "Measured speed is decreasing"
@@ -61,12 +70,26 @@ class VehicleStateAnalyzer:
         else:
             target, confidence, reason = VehicleState.CRUISING, 0.48, "Insufficient motion evidence"
 
-        # Hysteresis: require repeated evidence before leaving a stable state.
-        if target != self._state:
-            if target in (VehicleState.STOPPED, VehicleState.SLIDING, VehicleState.BRAKING):
+        # Severe events react immediately; routine transitions need two consecutive
+        # frames of evidence to prevent state flicker from packet noise.
+        immediate = (target == VehicleState.UNKNOWN or target == VehicleState.STOPPED
+                     or (target == VehicleState.SLIDING and slip >= 0.45)
+                     or (target == VehicleState.BRAKING and abs(accel or 0) >= 3.0))
+        if target == self._state:
+            self._candidate = None
+            self._candidate_count = 0
+        elif immediate:
+            self._set_state(target, now)
+        elif confidence >= 0.60:
+            if target == self._candidate:
+                self._candidate_count += 1
+            else:
+                self._candidate = target
+                self._candidate_count = 1
+            if self._candidate_count >= 2:
                 self._set_state(target, now)
-            elif confidence >= 0.60:
-                self._set_state(target, now)
+                self._candidate = None
+                self._candidate_count = 0
 
         state = self._state
         analysis = VehicleAnalysis(
@@ -83,8 +106,6 @@ class VehicleStateAnalyzer:
             reason=reason if state == target else f"Transition filter: {state.value}",
             updated_at=now,
         )
-        self._analysis = analysis
-        self._last_race_on = frame.race_on
         return analysis
 
     def _set_state(self, state: VehicleState, now: float) -> None:
