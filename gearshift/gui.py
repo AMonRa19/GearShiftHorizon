@@ -71,7 +71,9 @@ class HudWindow(QWidget):
                          Qt.WindowType.WindowStaysOnTopHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setWindowTitle("GearShiftHorizon HUD")
-        self.setFixedSize(330, 255)
+        self._base_size = (330, 255)
+        self.setFixedSize(*self._base_size)
+        self.setWindowOpacity(0.88)
         self._drag_offset = None
         self.tach = Tachometer()
         self.state_label = QLabel("ОЖИДАНИЕ ТЕЛЕМЕТРИИ")
@@ -90,6 +92,13 @@ class HudWindow(QWidget):
         layout.addWidget(self.detail)
         layout.addWidget(self.reason)
         self.setStyleSheet("background:rgba(16,23,34,224);border:1px solid #40536b;border-radius:14px;")
+
+    def set_scale(self, percent: int) -> None:
+        scale = max(70, min(140, int(percent))) / 100.0
+        self.setFixedSize(int(self._base_size[0] * scale), int(self._base_size[1] * scale))
+
+    def set_opacity(self, percent: int) -> None:
+        self.setWindowOpacity(max(35, min(100, int(percent))) / 100.0)
 
     def update_data(self, frame, analysis, decision) -> None:
         self.tach.set_values(frame)
@@ -125,6 +134,8 @@ class MainWindow(QMainWindow):
     hud_toggled = Signal(bool)
     automatic_toggled = Signal(bool)
     hold_changed = Signal(int)
+    hud_scale_changed = Signal(int)
+    hud_opacity_changed = Signal(int)
 
     def __init__(self) -> None:
         super().__init__()
@@ -219,6 +230,18 @@ class MainWindow(QMainWindow):
         self.hold_value = QLabel("40 мс")
         right_box.addWidget(self.hold_value)
         self.hold_slider.valueChanged.connect(lambda v: self.hold_value.setText(f"{v} мс"))
+        right_box.addWidget(QLabel("Размер игрового HUD"))
+        self.hud_scale = QSlider(Qt.Orientation.Horizontal)
+        self.hud_scale.setRange(70, 140)
+        self.hud_scale.setValue(100)
+        self.hud_scale.valueChanged.connect(self.hud_scale_changed.emit)
+        right_box.addWidget(self.hud_scale)
+        right_box.addWidget(QLabel("Прозрачность HUD"))
+        self.hud_opacity = QSlider(Qt.Orientation.Horizontal)
+        self.hud_opacity.setRange(35, 100)
+        self.hud_opacity.setValue(88)
+        self.hud_opacity.valueChanged.connect(self.hud_opacity_changed.emit)
+        right_box.addWidget(self.hud_opacity)
         self.connection_label = QLabel("UDP 5555 · ожидание Forza Data Out")
         self.connection_label.setObjectName("muted")
         right_box.addStretch()
