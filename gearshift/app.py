@@ -62,7 +62,9 @@ class ApplicationController(QObject):
         self.window = window
         self.hud = HudWindow()
         self.preferences = QSettings("AMonRa19", "GearShiftHorizon")
-        self.window.restoreGeometry(self.preferences.value("window/geometry", b""))
+        saved_geometry = self.preferences.value("window/geometry")
+        if saved_geometry:
+            self.window.restoreGeometry(saved_geometry)
         self.window.hud_scale.setValue(int(self.preferences.value("hud/scale", 100)))
         self.window.hud_opacity.setValue(int(self.preferences.value("hud/opacity", 88)))
         self.hud.set_scale(self.window.hud_scale.value())
