@@ -97,6 +97,24 @@ class TelemetryFrame:
         return max(abs(v) for v in self.combined_slips)
 
     @property
+    def car_class_label(self) -> str:
+        if 100 <= self.pi <= 500:
+            return "D"
+        if 501 <= self.pi <= 600:
+            return "C"
+        if 601 <= self.pi <= 700:
+            return "B"
+        if 701 <= self.pi <= 800:
+            return "A"
+        if 801 <= self.pi <= 900:
+            return "S1"
+        if 901 <= self.pi <= 998:
+            return "S2"
+        if self.pi == 999:
+            return "X"
+        return f"Class {self.car_class}"
+
+    @property
     def lateral_accel_raw(self) -> float:
         # Official FH6 Data Out axis convention: X is right, Y up, Z forward.
         return self.accel_xyz[0]
