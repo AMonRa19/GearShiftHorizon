@@ -19,7 +19,7 @@ class KeyboardOutput:
         if sys.platform != "win32":
             raise OSError("Automatic keyboard output is supported on Windows only")
         vk = _KEY_UP if direction == "UP" else _KEY_DOWN
-        count = max(1, min(6, int(count)))
+        count = max(1, min(10, int(count)))
         user32 = ctypes.WinDLL("user32", use_last_error=True)
 
         class KEYBDINPUT(ctypes.Structure):
