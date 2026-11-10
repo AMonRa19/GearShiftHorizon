@@ -72,12 +72,16 @@ class ShiftController:
         if frame.rpm_pct >= c.redline_guard_pct and frame.gear < c.max_gear:
             target = frame.gear + 1
             predicted = self._predict_rpm(frame, up_ratio)
-            if (predicted is not None and profile
-                    and profile.gear_samples.get(target, 0) >= 30
-                    and predicted < frame.engine_max_rpm * 1.02):
-                return self._decision(target, "REDLINE SAFETY", predicted, 0.8)
-            return ShiftDecision(reason="Redline reached but next-gear model is not sufficiently validated",
-                                 blocked_by="NO_SAFE_UPSHIFT_MODEL")
+            if predicted is not None and profile and profile.gear_samples.get(target, 0) >= 30:
+                if predicted < frame.engine_max_rpm * 1.02:
+                    return self._decision(target, "REDLINE SAFETY", predicted, 0.8)
+                return ShiftDecision(reason="Predicted RPM on next gear is outside the safe ceiling",
+                                     blocked_by="UNSAFE_PREDICTED_RPM")
+            # A ratio estimate is not required for the emergency upshift itself:
+            # moving one gear taller is preferable to remaining on the limiter.
+            return ShiftDecision(requested_gear=target, direction="UP",
+                                 reason="REDLINE SAFETY · adjacent ratio not yet learned",
+                                 confidence=0.55)
 
         if analysis.state == VehicleState.BRAKING and frame.brake > 0.15:
             target = frame.gear - 1
