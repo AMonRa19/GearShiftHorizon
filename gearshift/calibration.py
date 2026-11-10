@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
@@ -97,7 +98,10 @@ class CalibrationStore:
             "active_car": self.active_car,
             "profiles": {str(k): asdict(v) for k, v in self.profiles.items()},
         }
-        self.path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        try:
+            self.path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        except OSError:
+            logging.getLogger("gearshift").exception("Could not save calibration file %s", self.path)
 
     def load(self) -> None:
         if not self.path.exists():
