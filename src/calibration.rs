@@ -13,6 +13,8 @@ pub struct CarProfile {
     pub samples: u64, pub gear_ratio: [f32; 11], pub gear_samples: [u32; 11],
     pub upshift_rpm_pct: f32, pub downshift_rpm_pct: f32,
     pub upshift_observations: u32, pub downshift_observations: u32,
+    /// Smoothed per-car engine_max_rpm reported by FH telemetry; not a dyno-measured limiter cut.
+    pub learned_redline_rpm: f32, pub redline_observations: u32,
     pub power_curve: Vec<CurvePoint>, pub last_seen_unix: u64,
     /// Online acceleration model learned only from clean, steady-gear pulls.
     pub gear_accel_ema: [f32; 11], pub gear_accel_samples: [u32; 11],
@@ -21,7 +23,7 @@ pub struct CarProfile {
 impl Default for CarProfile {
     fn default() -> Self { Self { car_ordinal:0, car_class:0, pi:0, drivetrain:0, samples:0,
         gear_ratio:[0.0;11], gear_samples:[0;11], upshift_rpm_pct:0.90, downshift_rpm_pct:0.38,
-        upshift_observations:0, downshift_observations:0, power_curve:Vec::new(), last_seen_unix:0,
+        upshift_observations:0, downshift_observations:0, learned_redline_rpm:0.0, redline_observations:0, power_curve:Vec::new(), last_seen_unix:0,
         gear_accel_ema:[0.0;11], gear_accel_samples:[0;11], drive_style_aggression:0.5, learning_confidence:0.0 } }
 }
 
@@ -69,6 +71,31 @@ impl CarProfile {
         let first = first?;
         let last = previous?;
         if x <= first.rpm_pct { Some(first.power_kw) } else { Some(last.power_kw) }
+    }
+
+    /// Decide whether the next gear produces more estimated wheel-force proxy.
+    /// Returns None until both gear ratios and a useful power curve are learned.
+    pub fn should_upshift(&self, speed_ms: f32, current_rpm: f32, engine_max_rpm: f32, current_gear: u8) -> Option<bool> {
+        if !speed_ms.is_finite() || speed_ms < 2.0 || !current_rpm.is_finite() || engine_max_rpm <= 0.0 || current_gear == 0 || current_gear >= 10 { return None; }
+        let current = current_gear as usize;
+        let next = current + 1;
+        if self.gear_samples[current] < 30 || self.gear_samples[next] < 30 { return None; }
+        let current_ratio = self.gear_ratio[current];
+        let next_ratio = self.gear_ratio[next];
+        if !current_ratio.is_finite() || !next_ratio.is_finite() || current_ratio <= 0.0 || next_ratio <= 0.0 || next_ratio >= current_ratio { return None; }
+        let next_rpm = speed_ms * next_ratio;
+        let current_pct = (current_rpm / engine_max_rpm).clamp(0.10, 1.05);
+        let next_pct = next_rpm / engine_max_rpm;
+        if !next_pct.is_finite() || !(0.22..=0.94).contains(&next_pct) { return None; }
+        let current_power = self.estimated_power_kw(current_pct)?;
+        let next_power = self.estimated_power_kw(next_pct)?;
+        let current_omega = current_rpm * std::f32::consts::TAU / 60.0;
+        let next_omega = next_rpm * std::f32::consts::TAU / 60.0;
+        if current_omega <= 1.0 || next_omega <= 1.0 { return None; }
+        let current_force_proxy = (current_power * 1000.0 / current_omega) * current_ratio;
+        let next_force_proxy = (next_power * 1000.0 / next_omega) * next_ratio;
+        if !current_force_proxy.is_finite() || !next_force_proxy.is_finite() { return None; }
+        Some(next_force_proxy > current_force_proxy * 1.025)
     }
 
     /// Pick a lower gear using learned RPM/speed ratios and the learned power
