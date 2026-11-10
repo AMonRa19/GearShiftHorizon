@@ -5,7 +5,7 @@ import socket
 import sys
 from time import monotonic
 
-from PySide6.QtCore import QObject, QThread, QTimer, Signal
+from PySide6.QtCore import QObject, QSettings, QThread, QTimer, Signal
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from .analyzer import VehicleStateAnalyzer
@@ -61,6 +61,12 @@ class ApplicationController(QObject):
         super().__init__()
         self.window = window
         self.hud = HudWindow()
+        self.preferences = QSettings("AMonRa19", "GearShiftHorizon")
+        self.window.restoreGeometry(self.preferences.value("window/geometry", b""))
+        self.window.hud_scale.setValue(int(self.preferences.value("hud/scale", 100)))
+        self.window.hud_opacity.setValue(int(self.preferences.value("hud/opacity", 88)))
+        self.hud.move(int(self.preferences.value("hud/x", 40)),
+                      int(self.preferences.value("hud/y", 40)))
         self.analyzer = VehicleStateAnalyzer()
         self.calibration = CalibrationStore()
         self.shift = ShiftController(ControllerConfig())
@@ -80,8 +86,8 @@ class ApplicationController(QObject):
         self.window.hud_toggled.connect(self.toggle_hud)
         self.window.automatic_toggled.connect(self.set_automatic)
         self.window.hold_changed.connect(self.set_hold)
-        self.window.hud_scale_changed.connect(self.hud.set_scale)
-        self.window.hud_opacity_changed.connect(self.hud.set_opacity)
+        self.window.hud_scale_changed.connect(self.set_hud_scale)
+        self.window.hud_opacity_changed.connect(self.set_hud_opacity)
         self.refresh_timer = QTimer(self)
         self.refresh_timer.timeout.connect(self.refresh_ui)
         self.refresh_timer.start(50)
@@ -128,6 +134,14 @@ class ApplicationController(QObject):
     def set_hold(self, value: int) -> None:
         self.keyboard.hold_ms = max(10, min(120, value))
 
+    def set_hud_scale(self, value: int) -> None:
+        self.hud.set_scale(value)
+        self.preferences.setValue("hud/scale", value)
+
+    def set_hud_opacity(self, value: int) -> None:
+        self.hud.set_opacity(value)
+        self.preferences.setValue("hud/opacity", value)
+
     def toggle_hud(self, enabled: bool) -> None:
         self.hud.show() if enabled else self.hud.hide()
 
@@ -148,6 +162,9 @@ class ApplicationController(QObject):
         self.worker_thread.quit()
         self.worker_thread.wait(1000)
         self.calibration.save()
+        self.preferences.setValue("window/geometry", self.window.saveGeometry())
+        self.preferences.setValue("hud/x", self.hud.x())
+        self.preferences.setValue("hud/y", self.hud.y())
         self.hud.close()
 
 
