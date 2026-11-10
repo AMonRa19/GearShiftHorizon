@@ -4,9 +4,6 @@ use log::{error, info};
 use rdev::{simulate, EventType, Key};
 use std::{sync::{Arc,RwLock}, thread, time::{Duration, Instant}};
 
-// Upstream Virtual TCU KEY_HOLD_S = 0.04 seconds.
-const KEY_HOLD_MS: u64 = 40;
-
 #[derive(Clone, Debug)]
 pub struct ShiftCommand { pub from: u8, pub to: u8, pub reason: &'static str, pub created_at: Instant }
 
