@@ -99,6 +99,10 @@ class HudWindow(QWidget):
                 f"Газ {analysis.throttle:.0%}  Тормоз {analysis.brake:.0%}  "
                 f"Slip {analysis.max_wheel_slip:.2f}"
             )
+        else:
+            self.state_label.setText("НЕТ ТЕЛЕМЕТРИИ")
+            self.detail.setText("Сигнал FH6 потерян · автоматическое управление приостановлено")
+            self.reason.setText("TCU: ожидание данных")
         if decision:
             target = f"→ {decision.requested_gear}" if decision.requested_gear else "HOLD"
             predicted = f" · прогноз {decision.predicted_rpm:.0f} RPM" if decision.predicted_rpm else ""
@@ -153,6 +157,9 @@ class MainWindow(QMainWindow):
         header.addStretch()
         header.addWidget(version)
         outer.addLayout(header)
+        self.car_label = QLabel("Автомобиль: ожидание телеметрии")
+        self.car_label.setObjectName("muted")
+        outer.addWidget(self.car_label)
 
         cards = QGridLayout()
         cards.setSpacing(14)
@@ -229,8 +236,14 @@ class MainWindow(QMainWindow):
         self.hud_button.setText("HUD: ВКЛ" if enabled else "HUD: ВЫКЛ")
         self.hud_toggled.emit(enabled)
 
-    def update_snapshot(self, frame, analysis, decision, connected: bool) -> None:
+    def update_snapshot(self, frame, analysis, decision, connected: bool, profile=None) -> None:
         if frame:
+            self.car_label.setText(
+                f"Автомобиль ID {profile.car_ordinal} · класс {profile.car_class} · "
+                f"PI {profile.pi} · привод {profile.drivetrain} · "
+                f"обучено передач: {sum(1 for n in profile.gear_samples.values() if n >= 30)}"
+                if profile else f"Автомобиль ID {frame.car_ordinal} · класс {frame.car_class} · PI {frame.pi}"
+            )
             self.metric_labels["speed"].setText(f"{frame.speed_kmh:.0f} km/h")
             self.metric_labels["rpm"].setText(f"{frame.rpm:,.0f}")
             self.metric_labels["gear"].setText(str(frame.gear) if frame.gear else "—")
@@ -246,5 +259,12 @@ class MainWindow(QMainWindow):
             if decision:
                 predicted = f"\nПрогноз: {decision.predicted_rpm:.0f} RPM" if decision.predicted_rpm else ""
                 self.decision_label.setText(f"{decision.direction}: {decision.reason}{predicted}")
+        else:
+            for value in self.metric_labels.values():
+                value.setText("—")
+            self.car_label.setText("Автомобиль: ожидание телеметрии")
+            self.tach.set_values(None)
+            self.analysis_label.setText("Телеметрия отсутствует")
+            self.decision_label.setText("TCU приостановлен до восстановления сигнала")
         self.connection_label.setText("UDP подключён · получаем телеметрию" if connected
                                       else "Нет телеметрии · проверь Data Out / UDP 5555")
