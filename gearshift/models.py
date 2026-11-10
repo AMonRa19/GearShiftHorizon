@@ -97,9 +97,9 @@ class TelemetryFrame:
         return max(abs(v) for v in self.combined_slips)
 
     @property
-    def lateral_g_estimate(self) -> float:
+    def lateral_accel_raw(self) -> float:
         # Official FH6 Data Out axis convention: X is right, Y up, Z forward.
-        return self.accel_xyz[0] / 9.80665
+        return self.accel_xyz[0]
 
 
 @dataclass(slots=True)
@@ -113,7 +113,7 @@ class VehicleAnalysis:
     brake: float = 0.0
     max_wheel_slip: float = 0.0
     rpm_pct: float = 0.0
-    lateral_g: float = 0.0
+    lateral_accel_raw: float = 0.0
     smashable_vel_diff: float = 0.0
     steering_input: float = 0.0
     state_duration_s: float = 0.0
