@@ -80,6 +80,8 @@ class ApplicationController(QObject):
         self.window.hud_toggled.connect(self.toggle_hud)
         self.window.automatic_toggled.connect(self.set_automatic)
         self.window.hold_changed.connect(self.set_hold)
+        self.window.hud_scale_changed.connect(self.hud.set_scale)
+        self.window.hud_opacity_changed.connect(self.hud.set_opacity)
         self.refresh_timer = QTimer(self)
         self.refresh_timer.timeout.connect(self.refresh_ui)
         self.refresh_timer.start(50)
