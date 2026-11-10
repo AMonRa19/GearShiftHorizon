@@ -24,7 +24,7 @@ class Tachometer(QWidget):
         self.rpm = 0
         self.gear = 0
         self.speed = 0.0
-        self.setMinimumSize(250, 180)
+        self.setMinimumSize(180, 120)
 
     def set_values(self, frame) -> None:
         if frame:
