@@ -130,3 +130,12 @@ Automatic shift cooldown is fixed at 350 ms, matching `Cfg.SHIFT_COOLDOWN_MS` in
 - Once the learned data is sufficiently populated, downshift selection evaluates candidate gears using predicted RPM and a wheel-force proxy derived from estimated engine torque and the learned ratio. Until then, conservative sequential fallback logic remains active.
 - Redline and post-impact/deceleration recovery have priority over routine cornering, traction, and airtime locks; airtime lock still suppresses ordinary shifts while airborne. Ordinary shifts retain the 350 ms cooldown; critical redline protection uses its own guarded path.
 - Calibration confidence is a coverage indicator based on learned ratios, power-curve points, and per-gear acceleration samples; it is not a claim of perfect or machine-learning certainty.
+
+
+## v0.19.0 — priority redline protection and learned upshift model
+
+- Redline protection is evaluated before pending-shift acknowledgement and before routine driving locks. A pending downshift can no longer suppress an emergency upshift; an identical in-flight emergency upshift is not duplicated.
+- Per-car calibration smooths the engine maximum RPM reported by FH telemetry. This is a learned telemetry ceiling, not a claim that the physical limiter cut has been independently measured.
+- When both adjacent gear ratios and at least three useful power-curve regions are learned, the controller compares estimated wheel-force proxies in the current and next gear. The model is confidence-gated and falls back to the configured RPM threshold until sufficient data exists.
+- Keyboard commands use a one-slot bounded queue, expire after 1.2 seconds, and use the configured shift_hold_ms value (clamped to a safe 10–120 ms range).
+- The redline override threshold is 97.5% of the per-car learned/reported engine ceiling to request the shift before sustained limiter contact. Validate on track; telemetry and learned wheel-force values remain estimates.
