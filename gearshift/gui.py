@@ -106,8 +106,10 @@ class HudWindow(QWidget):
             self.state_label.setText(f"{analysis.state.value}  ·  {analysis.confidence:.0%}")
             self.detail.setText(
                 f"Газ {analysis.throttle:.0%}  Тормоз {analysis.brake:.0%}  "
-                f"Slip {analysis.max_wheel_slip:.2f}  "
-                f"{frame.power_w / 1000:.0f} kW · {frame.torque_nm:.0f} Nm"
+                f"Slip {analysis.max_wheel_slip:.2f}  Lat {analysis.lateral_g:+.2f} G  "
+                f"Steer {analysis.steering_input:+.0%}  "
+                f"{frame.power_w / 1000:.0f} kW · {frame.torque_nm:.0f} Nm  "
+                f"Boost {frame.boost_raw:.1f} PSI"
             )
         else:
             self.state_label.setText("НЕТ ТЕЛЕМЕТРИИ")
@@ -277,8 +279,15 @@ class MainWindow(QMainWindow):
                 accel = analysis.longitudinal_accel_mps2
                 accel_text = f"{accel:.2f}" if accel is not None else "—"
                 self.analysis_label.setText(
-                    f"{analysis.reason}\nУскорение по скорости: {accel_text} m/s²"
-                    f"\nПробуксовка: {analysis.max_wheel_slip:.3f}"
+                    f"{analysis.reason}\nПродольное ускорение: {accel_text} m/s²"
+                    f" · боковая нагрузка: {analysis.lateral_g:+.2f} G"
+                    f"\nГаз {analysis.throttle:.0%} · тормоз {analysis.brake:.0%}"
+                    f" · сцепление {frame.clutch_raw / 255:.0%} · ручник {frame.handbrake_raw / 255:.0%}"
+                    f"\nSlip ratio {frame.max_abs_slip:.3f} · combined slip {frame.max_abs_combined_slip:.3f}"
+                    f" · руль {analysis.steering_input:+.0%}"
+                    f"\nCollision Δv {frame.smashable_vel_diff:.2f} m/s · масса {frame.smashable_mass:.1f} kg"
+                    f"\nBoost {frame.boost_raw:.1f} PSI · топливо {frame.fuel:.0%}"
+                    f" · температура шин {sum(frame.tire_temps) / 4:.1f} (raw)"
                 )
             if decision:
                 predicted = f"\nПрогноз: {decision.predicted_rpm:.0f} RPM" if decision.predicted_rpm else ""
