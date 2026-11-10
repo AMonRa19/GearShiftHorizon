@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import socket
 import sys
+from time import monotonic
 
 from PySide6.QtCore import QObject, QThread, QTimer, Signal
 from PySide6.QtWidgets import QApplication, QMessageBox
@@ -123,11 +124,15 @@ class ApplicationController(QObject):
         self.hud.show() if enabled else self.hud.hide()
 
     def refresh_ui(self) -> None:
-        connected = bool(self.last_frame and
-                         (self.last_frame.received_at > 0))
-        self.window.update_snapshot(self.last_frame, self.last_analysis,
-                                    self.last_decision, connected)
-        self.hud.update_data(self.last_frame, self.last_analysis, self.last_decision)
+        connected = bool(self.last_frame and monotonic() - self.last_frame.received_at < 0.75)
+        if not connected and self.automatic:
+            self.automatic = False
+            self.window.auto_check.setChecked(False)
+        frame = self.last_frame if connected else None
+        analysis = self.last_analysis if connected else None
+        decision = self.last_decision if connected else None
+        self.window.update_snapshot(frame, analysis, decision, connected)
+        self.hud.update_data(frame, analysis, decision)
 
     def shutdown(self) -> None:
         self.worker.stop()
