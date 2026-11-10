@@ -110,7 +110,9 @@ class ShiftController:
         if (analysis.state == VehicleState.ACCELERATING and frame.throttle > 0.82
                 and frame.rpm_pct < c.downshift_rpm_pct and frame.gear > 1 and profile):
             candidates = []
-            for target in range(1, frame.gear):
+            power_model_ready = profile.estimated_power_kw(frame.rpm_pct) is not None
+            target_gears = range(1, frame.gear) if power_model_ready else (frame.gear - 1,)
+            for target in target_gears:
                 ratio = profile.gear_ratio_rpm_per_mps.get(target)
                 if profile.gear_samples.get(target, 0) < 30:
                     continue
@@ -118,6 +120,8 @@ class ShiftController:
                 if predicted is None or not (frame.idle_rpm * 1.2 < predicted < frame.engine_max_rpm * 0.88):
                     continue
                 power = profile.estimated_power_kw(predicted / frame.engine_max_rpm)
+                if power_model_ready and power is None:
+                    continue
                 candidates.append((power if power is not None else predicted, target, predicted, power is not None))
             if candidates:
                 _, target, predicted, power_valid = max(candidates, key=lambda item: item[0])
