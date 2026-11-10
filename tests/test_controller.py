@@ -46,3 +46,13 @@ def test_shift_confirmation_timeout_enters_retry_guard():
         frame(), VehicleAnalysis(state=VehicleState.CRUISING, speed_kmh=108), None
     )
     assert result.blocked_by == "SHIFT_NOT_CONFIRMED"
+
+
+def test_routine_shifts_are_blocked_during_impact_recovery():
+    result = ShiftController().evaluate(
+        frame(),
+        VehicleAnalysis(state=VehicleState.IMPACT, speed_kmh=108, smashable_vel_diff=4.0),
+        None,
+    )
+    assert result.requested_gear is None
+    assert result.blocked_by == "IMPACT"
