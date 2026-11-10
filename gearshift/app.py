@@ -65,6 +65,8 @@ class ApplicationController(QObject):
         self.window.restoreGeometry(self.preferences.value("window/geometry", b""))
         self.window.hud_scale.setValue(int(self.preferences.value("hud/scale", 100)))
         self.window.hud_opacity.setValue(int(self.preferences.value("hud/opacity", 88)))
+        self.hud.set_scale(self.window.hud_scale.value())
+        self.hud.set_opacity(self.window.hud_opacity.value())
         self.hud.move(int(self.preferences.value("hud/x", 40)),
                       int(self.preferences.value("hud/y", 40)))
         self.analyzer = VehicleStateAnalyzer()
