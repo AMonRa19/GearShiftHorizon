@@ -29,7 +29,7 @@ impl Tcu {
         self.last_shift_was_braking = reason == "ENGINE BRAKE";
         if reason == "UPSHIFT" { self.upshift_armed = false; }
         self.pending_shift = Some((td.gear, target, now));
-        Some(ShiftCommand { from: td.gear, to: target, reason })
+        Some(ShiftCommand { from: td.gear, to: target, reason, created_at: now })
     }
 
     fn predicted_target_rpm_pct(td: &Telemetry, profile: Option<&CarProfile>, target_gear: usize) -> Option<f32> {
@@ -57,6 +57,26 @@ impl Tcu {
         }
         self.last_timestamp = Some(td.session_timestamp);
         self.telemetry_lost = false;
+
+        // Critical redline override runs before pending-shift acknowledgement and routine locks.
+        let speed = td.speed_kmh();
+        let reported_redline = profile
+            .filter(|p| p.redline_observations >= 8 && p.learned_redline_rpm.is_finite() && p.learned_redline_rpm > 0.0)
+            .map(|p| p.learned_redline_rpm)
+            .unwrap_or(td.engine_max_rpm);
+        let redline_pct = if reported_redline > 0.0 { td.current_rpm / reported_redline } else { 0.0 };
+        if cfg.automatic && td.is_race_on != 0 && td.gear > 0 && td.gear < 10
+            && td.engine_max_rpm > 0.0 && td.current_rpm.is_finite() && speed > 3.0
+            && redline_pct >= 0.975 {
+            let same_upshift_pending = self.pending_shift
+                .map(|(_, target, _)| target == td.gear.saturating_add(1))
+                .unwrap_or(false);
+            if same_upshift_pending { return None; }
+            if self.elapsed_since_shift() >= Duration::from_millis(120) {
+                self.pending_shift = None;
+                return self.issue(td, td.gear + 1, "REDLINE OVERRIDE");
+            }
+        }
 
         // Confirm a requested shift before issuing another one. An unexpected
         // gear change cancels the pending command too, but never triggers a cascade.
@@ -102,14 +122,6 @@ impl Tcu {
         let throttle = td.throttle();
         let brake = td.brake();
         let pct = td.rpm_pct();
-
-        // Hard redline protection: do not let corner/traction locks or a normal
-        // shift threshold keep the engine on the limiter. Pending acknowledgement
-        // still prevents repeated key pulses for the same requested shift.
-        if pct >= 0.985 && td.gear < 10 && speed > 3.0
-            && self.elapsed_since_shift() >= Duration::from_millis(120) {
-            return self.issue(td, td.gear + 1, "REDLINE OVERRIDE");
-        }
 
         // Profile presets are applied as runtime overlays; the user's base settings
         // remain intact when switching between Comfort/Race/Drift/Drag/Off-road.
@@ -273,10 +285,43 @@ impl Tcu {
         // The pending-shift acknowledgement and upshift_armed latch prevent cascades.
         let upshift_interval = shift_delay_ms;
         let recently_brake_shifted = self.last_shift_was_braking && self.elapsed_since_shift() < Duration::from_millis(600);
+        let learned_force_upshift = profile
+            .and_then(|p| p.should_upshift(td.speed_ms, td.current_rpm, reported_redline, td.gear))
+            .unwrap_or(false);
         if self.upshift_armed && !recently_brake_shifted && self.elapsed_since_shift() >= Duration::from_millis(upshift_interval)
-            && throttle > 0.18 && brake < 0.05 && pct > upshift_pct && td.gear < 10 {
-            return self.issue(td, td.gear + 1, "UPSHIFT");
+            && throttle > 0.18 && brake < 0.05 && (pct > upshift_pct || learned_force_upshift) && td.gear < 10 {
+            return self.issue(td, td.gear + 1, if learned_force_upshift { "OPTIMAL WHEEL-FORCE UPSHIFT" } else { "UPSHIFT" });
         }
         None
+    }
+}
+
+#[cfg(test)]
+mod priority_tests {
+    use super::*;
+    use crate::{config::Config, telemetry::Telemetry};
+
+    #[test]
+    fn redline_override_supersedes_pending_downshift() {
+        let mut tcu = Tcu::default();
+        tcu.last_shift = Some(Instant::now() - Duration::from_secs(1));
+        tcu.pending_shift = Some((4, 3, Instant::now() - Duration::from_millis(300)));
+        let mut td = Telemetry::default();
+        td.is_race_on = 1; td.session_timestamp = 100; td.engine_max_rpm = 8000.0;
+        td.current_rpm = 7900.0; td.speed_ms = 30.0; td.gear = 4; td.accel_raw = 255;
+        let mut cfg = Config::default(); cfg.automatic = true;
+        let cmd = tcu.process(&td, &cfg, 0.016, None).expect("redline override should win");
+        assert_eq!(cmd.from, 4); assert_eq!(cmd.to, 5); assert_eq!(cmd.reason, "REDLINE OVERRIDE");
+    }
+
+    #[test]
+    fn identical_pending_redline_upshift_is_not_duplicated() {
+        let mut tcu = Tcu::default();
+        tcu.last_shift = Some(Instant::now() - Duration::from_millis(200));
+        tcu.pending_shift = Some((4, 5, Instant::now() - Duration::from_millis(100)));
+        let mut td = Telemetry::default();
+        td.is_race_on = 1; td.session_timestamp = 101; td.engine_max_rpm = 8000.0;
+        td.current_rpm = 7900.0; td.speed_ms = 30.0; td.gear = 4; td.accel_raw = 255;
+        assert!(tcu.process(&td, &Config::default(), 0.016, None).is_none());
     }
 }
