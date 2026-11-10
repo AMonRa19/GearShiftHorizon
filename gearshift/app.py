@@ -90,11 +90,15 @@ class ApplicationController(QObject):
         if self.last_frame and frame.timestamp_ms < self.last_frame.timestamp_ms:
             if self.last_frame.timestamp_ms - frame.timestamp_ms < 0x80000000:
                 return
-        if self.last_frame and self.last_frame.car_ordinal != frame.car_ordinal:
+        if self.last_frame and (
+            self.last_frame.car_ordinal != frame.car_ordinal
+            or self.last_frame.race_on != frame.race_on
+        ):
             self.analyzer.reset()
             self.shift.cancel_pending()
         analysis = self.analyzer.update(frame)
-        profile = self.calibration.observe(frame, analysis.state.value)
+        profile = (self.calibration.observe(frame, analysis.state.value)
+                   if frame.race_on else self.calibration.active())
         decision = self.shift.evaluate(frame, analysis, profile)
         self.last_frame, self.last_analysis, self.last_decision = frame, analysis, decision
         self.last_profile = profile
