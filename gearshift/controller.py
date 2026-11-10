@@ -70,7 +70,7 @@ class ShiftController:
         if frame.speed_kmh < c.min_speed_kmh:
             return ShiftDecision(reason="Vehicle speed too low", blocked_by="LOW_SPEED")
         if analysis.state in (VehicleState.STOPPED, VehicleState.SLIDING,
-                              VehicleState.AIRBORNE, VehicleState.UNKNOWN):
+                              VehicleState.AIRBORNE, VehicleState.IMPACT, VehicleState.UNKNOWN):
             return ShiftDecision(reason=f"Shift inhibited in {analysis.state.value}",
                                  blocked_by=analysis.state.value)
 
