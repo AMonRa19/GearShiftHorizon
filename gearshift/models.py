@@ -14,6 +14,7 @@ class VehicleState(StrEnum):
     SLIDING = "SLIDING"
     RECOVERING = "RECOVERING"
     AIRBORNE = "AIRBORNE"
+    IMPACT = "IMPACT"
 
 
 @dataclass(slots=True)
@@ -112,6 +113,9 @@ class VehicleAnalysis:
     brake: float = 0.0
     max_wheel_slip: float = 0.0
     rpm_pct: float = 0.0
+    lateral_g: float = 0.0
+    smashable_vel_diff: float = 0.0
+    steering_input: float = 0.0
     state_duration_s: float = 0.0
     reason: str = "Waiting for telemetry"
     updated_at: float = field(default_factory=monotonic)
