@@ -15,3 +15,9 @@ jobs:
         run: cargo test --all-targets --verbose
       - name: Build release
         run: cargo build --release --verbose
+      - name: Upload Windows executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: GearShiftHorizon-v0.19.0-windows-x64
+          path: target/release/fh6-virtual-tcu-rust.exe
+          if-no-files-found: error
