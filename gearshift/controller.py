@@ -14,6 +14,7 @@ class ControllerConfig:
     redline_guard_pct: float = 0.975
     downshift_rpm_pct: float = 0.34
     cooldown_s: float = 0.35
+    emergency_cooldown_s: float = 0.12
     confirmation_timeout_s: float = 1.4
     failed_shift_retry_s: float = 1.2
     min_speed_kmh: float = 8.0
@@ -40,6 +41,32 @@ class ShiftController:
         if frame.gear <= 0:
             return ShiftDecision(reason="Neutral/reverse/unknown gear; automatic shifting inhibited",
                                  blocked_by="INVALID_GEAR")
+
+        # Critical redline guard runs before routine driving-state locks and pending
+        # downshift acknowledgement, matching the intended emergency priority.
+        if (frame.gear < c.max_gear and frame.speed_kmh > 3.0
+                and frame.engine_max_rpm > 0
+                and frame.rpm_pct >= c.redline_guard_pct):
+            emergency_target = frame.gear + 1
+            if self._pending_target == emergency_target:
+                return ShiftDecision(reason="Emergency upshift already pending",
+                                     blocked_by="SHIFT_PENDING")
+            if now - self._last_shift_at < c.emergency_cooldown_s:
+                return ShiftDecision(reason="Emergency upshift cooldown",
+                                     blocked_by="COOLDOWN")
+            self._pending_target = None
+            self._pending_since = 0.0
+            ratio = profile.gear_ratio_rpm_per_mps.get(emergency_target) if profile else None
+            predicted = self._predict_rpm(frame, ratio)
+            samples = profile.gear_samples.get(emergency_target, 0) if profile else 0
+            if predicted is not None and samples >= 30 and predicted >= frame.engine_max_rpm * 1.02:
+                return ShiftDecision(reason="Next-gear RPM prediction exceeds safety ceiling",
+                                     blocked_by="UNSAFE_PREDICTED_RPM")
+            return ShiftDecision(requested_gear=emergency_target, direction="UP",
+                                 reason=("REDLINE SAFETY" if predicted is not None and samples >= 30
+                                         else "REDLINE SAFETY · adjacent ratio not yet learned"),
+                                 predicted_rpm=predicted, confidence=0.8 if samples >= 30 else 0.55)
+
         if frame.speed_kmh < c.min_speed_kmh:
             return ShiftDecision(reason="Vehicle speed too low", blocked_by="LOW_SPEED")
         if analysis.state in (VehicleState.STOPPED, VehicleState.SLIDING,
@@ -67,36 +94,23 @@ class ShiftController:
         if now - self._last_shift_at < c.cooldown_s:
             return ShiftDecision(reason="Shift cooldown", blocked_by="COOLDOWN")
 
-        up_ratio = profile.gear_ratio_rpm_per_mps.get(frame.gear + 1) if profile else None
-        down_ratio = profile.gear_ratio_rpm_per_mps.get(frame.gear - 1) if profile else None
-        if frame.rpm_pct >= c.redline_guard_pct and frame.gear < c.max_gear:
-            target = frame.gear + 1
-            predicted = self._predict_rpm(frame, up_ratio)
-            if predicted is not None and profile and profile.gear_samples.get(target, 0) >= 30:
-                if predicted < frame.engine_max_rpm * 1.02:
-                    return self._decision(target, "REDLINE SAFETY", predicted, 0.8)
-                return ShiftDecision(reason="Predicted RPM on next gear is outside the safe ceiling",
-                                     blocked_by="UNSAFE_PREDICTED_RPM")
-            # A ratio estimate is not required for the emergency upshift itself:
-            # moving one gear taller is preferable to remaining on the limiter.
-            return ShiftDecision(requested_gear=target, direction="UP",
-                                 reason="REDLINE SAFETY · adjacent ratio not yet learned",
-                                 confidence=0.55)
+        up_target = frame.gear + 1
+        down_target = frame.gear - 1
+        up_ratio = profile.gear_ratio_rpm_per_mps.get(up_target) if profile else None
+        down_ratio = profile.gear_ratio_rpm_per_mps.get(down_target) if profile else None
 
         if analysis.state == VehicleState.BRAKING and frame.brake > 0.15:
-            target = frame.gear - 1
-            if down_ratio and profile and profile.gear_samples.get(target, 0) >= 30:
+            if down_ratio and profile and profile.gear_samples.get(down_target, 0) >= 30:
                 predicted = self._predict_rpm(frame, down_ratio)
                 if predicted and frame.idle_rpm * 1.15 < predicted < frame.engine_max_rpm * 0.88:
-                    return self._decision(target, "MEASURED BRAKING + SAFE RPM", predicted, 0.75)
+                    return self._decision(down_target, "MEASURED BRAKING + SAFE RPM", predicted, 0.75)
 
         if (analysis.state == VehicleState.ACCELERATING and frame.throttle > 0.72
                 and frame.rpm_pct >= c.upshift_rpm_pct):
-            target = frame.gear + 1
-            if up_ratio and profile and profile.gear_samples.get(target, 0) >= 30:
+            if up_ratio and profile and profile.gear_samples.get(up_target, 0) >= 30:
                 predicted = self._predict_rpm(frame, up_ratio)
                 if predicted and frame.idle_rpm * 1.2 < predicted < frame.engine_max_rpm * 0.94:
-                    return self._decision(target, "LEARNED UPSHIFT MODEL", predicted, 0.7)
+                    return self._decision(up_target, "LEARNED UPSHIFT MODEL", predicted, 0.7)
             return ShiftDecision(reason="Upshift threshold reached; waiting for a validated next-gear model",
                                  blocked_by="INSUFFICIENT_CALIBRATION")
         return ShiftDecision(reason="Current gear remains appropriate")
