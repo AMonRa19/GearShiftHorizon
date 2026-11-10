@@ -42,7 +42,7 @@ class TelemetryFrame:
     clutch_raw: int
     gear: int
     yaw_pitch_roll: tuple[float, float, float] = (0.0, 0.0, 0.0)
-    normalized_suspension_travel: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0)
+    normalized_suspension_travel: tuple[float, float, float, float] | None = None
     wheel_rotation_speeds: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0)
     wheel_on_rumble_strip: tuple[int, int, int, int] = (0, 0, 0, 0)
     wheel_in_puddle: tuple[int, int, int, int] = (0, 0, 0, 0)
