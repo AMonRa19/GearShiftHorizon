@@ -1,0 +1,95 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from time import monotonic
+
+from .calibration import CarProfile
+from .models import ShiftDecision, TelemetryFrame, VehicleAnalysis, VehicleState
+
+
+@dataclass
+class ControllerConfig:
+    automatic: bool = False
+    upshift_rpm_pct: float = 0.91
+    redline_guard_pct: float = 0.975
+    downshift_rpm_pct: float = 0.34
+    cooldown_s: float = 0.35
+    min_speed_kmh: float = 8.0
+    max_gear: int = 10
+
+
+class ShiftController:
+    """Conservative prediction-based controller. Missing data means HOLD, never guess."""
+
+    def __init__(self, config: ControllerConfig | None = None) -> None:
+        self.config = config or ControllerConfig()
+        self._last_shift_at = 0.0
+        self._pending_target: int | None = None
+
+    def evaluate(self, frame: TelemetryFrame, analysis: VehicleAnalysis,
+                 profile: CarProfile | None) -> ShiftDecision:
+        c = self.config
+        if not frame.race_on:
+            return ShiftDecision(reason="Race is not active", blocked_by="NO_RACE")
+        if frame.gear <= 0:
+            return ShiftDecision(reason="Neutral/reverse/unknown gear; automatic shifting inhibited",
+                                 blocked_by="INVALID_GEAR")
+        if frame.speed_kmh < c.min_speed_kmh:
+            return ShiftDecision(reason="Vehicle speed too low", blocked_by="LOW_SPEED")
+        if analysis.state in (VehicleState.STOPPED, VehicleState.SLIDING,
+                              VehicleState.AIRBORNE, VehicleState.UNKNOWN):
+            return ShiftDecision(reason=f"Shift inhibited in {analysis.state.value}",
+                                 blocked_by=analysis.state.value)
+        if self._pending_target is not None:
+            if frame.gear == self._pending_target:
+                self._pending_target = None
+            else:
+                return ShiftDecision(reason=f"Waiting for gear {self._pending_target} confirmation",
+                                     blocked_by="SHIFT_PENDING")
+        if monotonic() - self._last_shift_at < c.cooldown_s:
+            return ShiftDecision(reason="Shift cooldown", blocked_by="COOLDOWN")
+
+        up_ratio = profile.gear_ratio_rpm_per_mps.get(frame.gear + 1) if profile else None
+        down_ratio = profile.gear_ratio_rpm_per_mps.get(frame.gear - 1) if profile else None
+        if frame.rpm_pct >= c.redline_guard_pct and frame.gear < c.max_gear:
+            target = frame.gear + 1
+            predicted = self._predict_rpm(frame, up_ratio, target)
+            if predicted is not None and predicted < frame.engine_max_rpm * 1.02:
+                return self._decision(target, "REDLINE SAFETY", predicted, 0.8)
+            return ShiftDecision(reason="Redline reached but next-gear model is not safe/available",
+                                 blocked_by="NO_SAFE_UPSHIFT_MODEL")
+
+        if analysis.state == VehicleState.BRAKING and frame.brake > 0.15:
+            if down_ratio and profile and profile.gear_samples.get(frame.gear - 1, 0) >= 30:
+                predicted = self._predict_rpm(frame, down_ratio, frame.gear - 1)
+                if predicted and frame.idle_rpm * 1.15 < predicted < frame.engine_max_rpm * 0.88:
+                    return self._decision(frame.gear - 1, "MEASURED BRAKING + SAFE RPM", predicted, 0.75)
+
+        if (analysis.state == VehicleState.ACCELERATING and frame.throttle > 0.72
+                and frame.rpm_pct >= c.upshift_rpm_pct):
+            if up_ratio and profile and profile.gear_samples.get(frame.gear + 1, 0) >= 30:
+                predicted = self._predict_rpm(frame, up_ratio, frame.gear + 1)
+                if predicted and frame.idle_rpm * 1.2 < predicted < frame.engine_max_rpm * 0.94:
+                    return self._decision(frame.gear + 1, "LEARNED UPSHIFT MODEL", predicted, 0.7)
+            return ShiftDecision(reason="Upshift threshold reached; waiting for a validated next-gear model",
+                                 blocked_by="INSUFFICIENT_CALIBRATION")
+        return ShiftDecision(reason="Current gear remains appropriate")
+
+    @staticmethod
+    def _predict_rpm(frame: TelemetryFrame, ratio: float | None, target: int) -> float | None:
+        if ratio is None or frame.speed_mps <= 0:
+            return None
+        predicted = frame.speed_mps * ratio
+        return predicted if predicted > 0 else None
+
+    def _decision(self, target: int, reason: str, predicted: float, confidence: float) -> ShiftDecision:
+        return ShiftDecision(requested_gear=target,
+                             direction="UP" if reason.startswith(("REDLINE", "LEARNED UPSHIFT")) else "DOWN",
+                             reason=reason, predicted_rpm=predicted, confidence=confidence)
+
+    def confirm_sent(self, target_gear: int) -> None:
+        self._pending_target = target_gear
+        self._last_shift_at = monotonic()
+
+    def cancel_pending(self) -> None:
+        self._pending_target = None
