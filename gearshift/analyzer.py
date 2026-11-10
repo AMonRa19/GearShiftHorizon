@@ -114,7 +114,7 @@ class VehicleStateAnalyzer:
             brake=frame.brake,
             max_wheel_slip=slip,
             rpm_pct=frame.rpm_pct,
-            lateral_g=frame.lateral_g_estimate,
+            lateral_accel_raw=frame.lateral_accel_raw,
             smashable_vel_diff=frame.smashable_vel_diff,
             steering_input=frame.steer / 127.0,
             state_duration_s=max(0.0, now - self._state_since),
