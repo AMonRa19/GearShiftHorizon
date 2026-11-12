@@ -16,7 +16,7 @@ pub struct Telemetry {
     pub boost_raw: f32,
     pub car_ordinal: i32, pub car_class: i32, pub pi: i32,
     pub drivetrain: i32, pub num_cylinders: i32,
-    pub accel_raw: u8, pub brake_raw: u8, pub clutch_raw: u8, pub gear: u8,
+    pub accel_raw: u8, pub brake_raw: u8, pub clutch_raw: u8, pub handbrake_raw: u8, pub gear: u8,
     pub slip_fl: f32, pub slip_fr: f32, pub slip_rl: f32, pub slip_rr: f32,
 }
 impl Telemetry {
@@ -55,7 +55,7 @@ impl Telemetry {
         t.torque_nm=Self::f32_at(b,264)?; t.boost_raw=Self::f32_at(b,284)?;
         t.slip_fl=Self::f32_at(b,84)?; t.slip_fr=Self::f32_at(b,88)?;
         t.slip_rl=Self::f32_at(b,92)?; t.slip_rr=Self::f32_at(b,96)?;
-        t.accel_raw=b[315]; t.brake_raw=b[316]; t.clutch_raw=b[317]; t.gear=b[319];
+        t.accel_raw=b[315]; t.brake_raw=b[316]; t.clutch_raw=b[317]; t.handbrake_raw=b[318]; t.gear=b[319];
         if !t.core_values_finite() { return None; }
         Some(t)
     }
@@ -69,5 +69,6 @@ impl Telemetry {
     }
     pub fn throttle(&self) -> f32 { self.accel_raw as f32 / 255.0 }
     pub fn brake(&self) -> f32 { self.brake_raw as f32 / 255.0 }
+    pub fn handbrake(&self) -> f32 { self.handbrake_raw as f32 / 255.0 }
     pub fn rear_slip(&self) -> f32 { self.slip_rl.abs().max(self.slip_rr.abs()) }
 }
