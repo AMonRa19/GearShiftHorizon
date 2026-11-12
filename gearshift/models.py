@@ -116,7 +116,7 @@ class TelemetryFrame:
 
     @property
     def lateral_accel_raw(self) -> float:
-        # Official FH6 Data Out axis convention: X is right, Y up, Z forward.
+        # FH6 local-space X acceleration is lateral and is reported in m/s^2.
         return self.accel_xyz[0]
 
 
@@ -137,6 +137,10 @@ class VehicleAnalysis:
     state_duration_s: float = 0.0
     reason: str = "Waiting for telemetry"
     updated_at: float = field(default_factory=monotonic)
+
+    @property
+    def lateral_g(self) -> float:
+        return self.lateral_accel_raw / 9.80665
 
 
 @dataclass(slots=True)
