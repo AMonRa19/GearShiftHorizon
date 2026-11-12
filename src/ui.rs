@@ -7,6 +7,9 @@ static SNAPSHOT: OnceLock<Mutex<Option<Telemetry>>> = OnceLock::new();
 static CALIBRATION: OnceLock<Mutex<CalibrationStore>> = OnceLock::new();
 pub fn publish_snapshot(t:Telemetry) { *SNAPSHOT.get_or_init(||Mutex::new(None)).lock().unwrap()=Some(t); }
 pub fn publish_calibration(c:CalibrationStore) { *CALIBRATION.get_or_init(||Mutex::new(CalibrationStore::default())).lock().unwrap()=c; }
+fn thirty_two() -> f32 { 32.0 }
+fn forty_eight() -> f32 { 48.0 }
+
 fn draw_chart(ui:&mut egui::Ui, title:&str, values:&[f32], color:egui::Color32) {
     ui.label(title); let (rect,_) = ui.allocate_exact_size(egui::vec2(ui.available_width(),130.0),egui::Sense::hover());
     let painter=ui.painter_at(rect); painter.rect_filled(rect,5.0,egui::Color32::from_rgb(12,18,27));
@@ -17,9 +20,9 @@ fn draw_chart(ui:&mut egui::Ui, title:&str, values:&[f32], color:egui::Color32) 
     painter.add(egui::Shape::line(pts,egui::Stroke::new(2.0_f32,color)));
 }
 
-pub struct TcuApp { cfg:Arc<RwLock<Config>>, status:String, ui_scale:f32 }
+pub struct TcuApp { cfg:Arc<RwLock<Config>>, status:String, ui_scale:f32, hud_enabled:bool }
 impl TcuApp {
-    pub fn new(cfg:Arc<RwLock<Config>>) -> Self { Self{cfg,status:"Ожидание телеметрии".into(),ui_scale:1.0} }
+    pub fn new(cfg:Arc<RwLock<Config>>) -> Self { Self{cfg,status:"Ожидание телеметрии".into(),ui_scale:1.0,hud_enabled:false} }
 }
 impl eframe::App for TcuApp {
     fn update(&mut self, ctx:&egui::Context, _frame:&mut eframe::Frame) {
@@ -28,8 +31,9 @@ impl eframe::App for TcuApp {
         let cal=CALIBRATION.get_or_init(||Mutex::new(CalibrationStore::default())).lock().unwrap().clone();
         egui::TopBottomPanel::top("topbar").show(ctx, |ui| {
             ui.horizontal(|ui| {
-                ui.heading("FH6 Virtual TCU — Rust");
+                ui.heading("GearShiftHorizon · Rust Core");
                 ui.separator();
+                ui.checkbox(&mut self.hud_enabled, "HUD поверх игры");
                 ui.label("Локальная панель управления");
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.add(egui::Slider::new(&mut self.ui_scale,0.80..=1.35).text("Масштаб").show_value(true));
@@ -113,6 +117,61 @@ impl eframe::App for TcuApp {
                 });
             });
         });
+        if self.hud_enabled {
+            let mut close_hud = false;
+            let hud_id = egui::ViewportId::from_hash_of("gearshift_horizon_hud");
+            ctx.show_viewport_immediate(
+                hud_id,
+                egui::ViewportBuilder::default()
+                    .with_title("GearShiftHorizon HUD")
+                    .with_inner_size([340.0, 176.0])
+                    .with_min_inner_size([300.0, 150.0])
+                    .with_decorations(false)
+                    .with_always_on_top(),
+                |hud_ctx, _class| {
+                    if hud_ctx.input(|i| i.viewport().close_requested()) {
+                        close_hud = true;
+                    }
+                    egui::CentralPanel::default()
+                        .frame(egui::Frame::none().fill(egui::Color32::from_rgba_unmultiplied(12, 18, 28, 238)))
+                        .show(hud_ctx, |ui| {
+                            ui.horizontal(|ui| {
+                                ui.strong("GEARSHIFT HUD");
+                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                    if ui.small_button("×").clicked() { close_hud = true; }
+                                });
+                            });
+                            ui.separator();
+                            if let Some(t) = td.as_ref() {
+                                let pct = (t.rpm_pct().clamp(0.0, 1.0)) as f64;
+                                let color = if pct >= 0.94 { egui::Color32::from_rgb(255, 82, 92) }
+                                    else if pct >= 0.82 { egui::Color32::from_rgb(255, 190, 82) }
+                                    else { egui::Color32::from_rgb(54, 190, 245) };
+                                ui.horizontal(|ui| {
+                                    ui.vertical(|ui| {
+                                        ui.label("ОБОРОТЫ");
+                                        ui.heading(egui::RichText::new(format!("{:.0}", t.current_rpm)).size( thirty_two()).strong());
+                                        ui.label(format!("из {:.0} RPM", t.engine_max_rpm));
+                                    });
+                                    ui.separator();
+                                    ui.vertical(|ui| {
+                                        ui.label("ПЕРЕДАЧА");
+                                        ui.heading(egui::RichText::new(format!("{}", t.gear)).size( forty_eight()).strong());
+                                        ui.label(format!("{:.0} км/ч", t.speed_kmh()));
+                                    });
+                                });
+                                ui.add(egui::ProgressBar::new(pct as f32).fill(color).text(format!("{:.0}% RPM", pct * 100.0)));
+                                ui.label(format!("Газ {:.0}%   Тормоз {:.0}%   Ручник {:.0}%",
+                                    t.throttle()*100.0, t.brake()*100.0, t.handbrake()*100.0));
+                            } else {
+                                ui.centered_and_justified(|ui| { ui.label("Ожидание телеметрии FH6…"); });
+                            }
+                        });
+                    hud_ctx.request_repaint_after(std::time::Duration::from_millis(33));
+                },
+            );
+            if close_hud { self.hud_enabled = false; }
+        }
         ctx.request_repaint_after(std::time::Duration::from_millis(33));
     }
 }
