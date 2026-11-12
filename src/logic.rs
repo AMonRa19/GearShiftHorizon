@@ -58,6 +58,13 @@ impl Tcu {
         self.last_timestamp = Some(td.session_timestamp);
         self.telemetry_lost = false;
 
+        // The handbrake is a hard inhibit and must be checked before the
+        // redline override. FH6 reports it at packet byte 318.
+        if td.handbrake() >= 0.10 {
+            self.pending_shift = None;
+            return None;
+        }
+
         // Critical redline override runs before pending-shift acknowledgement and routine locks.
         let speed = td.speed_kmh();
         let reported_redline = profile
@@ -67,6 +74,7 @@ impl Tcu {
         let redline_pct = if reported_redline > 0.0 { td.current_rpm / reported_redline } else { 0.0 };
         if cfg.automatic && td.is_race_on != 0 && td.gear > 0 && td.gear < 10
             && td.engine_max_rpm > 0.0 && td.current_rpm.is_finite() && speed > 3.0
+            && td.throttle() >= 0.20 && td.brake() < 0.15
             && redline_pct >= 0.975 {
             let same_upshift_pending = self.pending_shift
                 .map(|(_, target, _)| target == td.gear.saturating_add(1))
