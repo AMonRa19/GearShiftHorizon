@@ -17,7 +17,7 @@ from .controller import ControllerConfig, ShiftController
 from .gui import HudWindow, MainWindow
 from .input_win import KeyboardOutput
 from .models import ShiftDecision, TelemetryFrame, VehicleAnalysis
-from .telemetry import PACKET_SIZE, TelemetryParseError, parse_packet
+from .telemetry import TelemetryParseError, parse_packet
 
 LOG = logging.getLogger("gearshift")
 DEFAULT_UDP_PORT = 5555
