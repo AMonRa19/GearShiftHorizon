@@ -43,7 +43,7 @@ impl eframe::App for TcuApp {
         });
         egui::CentralPanel::default().show(ctx, |ui| {
             egui::ScrollArea::vertical().auto_shrink([false,false]).show(ui, |ui| {
-                if let Some(t)=td {
+                if let Some(t)=td.as_ref() {
                     self.status="Телеметрия получена".into();
                     ui.horizontal_wrapped(|ui| {
                         ui.group(|ui| { ui.label("СКОРОСТЬ"); ui.heading(format!("{:.1} км/ч",t.speed_kmh())); });
