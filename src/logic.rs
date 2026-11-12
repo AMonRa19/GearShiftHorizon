@@ -79,7 +79,17 @@ impl Tcu {
             let same_upshift_pending = self.pending_shift
                 .map(|(_, target, _)| target == td.gear.saturating_add(1))
                 .unwrap_or(false);
-            if same_upshift_pending { return None; }
+            // A pending upshift is not proof that the game accepted the key.
+            // Retry the emergency command after a short acknowledgement window.
+            if same_upshift_pending {
+                let pending_age = self.pending_shift
+                    .map(|(_, _, sent_at)| sent_at.elapsed())
+                    .unwrap_or_default();
+                if pending_age < Duration::from_millis(350) {
+                    return None;
+                }
+                self.pending_shift = None;
+            }
             if self.elapsed_since_shift() >= Duration::from_millis(120) {
                 self.pending_shift = None;
                 return self.issue(td, td.gear + 1, "REDLINE OVERRIDE");
@@ -91,6 +101,11 @@ impl Tcu {
         if let Some((from, target, sent_at)) = self.pending_shift {
             if td.gear == target {
                 self.pending_shift = None;
+            } else if target > from && sent_at.elapsed() >= Duration::from_millis(600) {
+                // Failed upshifts must not hold the controller at high RPM.
+                // Re-arm the normal threshold so it can issue a fresh attempt.
+                self.pending_shift = None;
+                self.upshift_armed = true;
             } else if sent_at.elapsed() >= Duration::from_millis(1400) {
                 self.pending_shift = None;
             } else {
@@ -330,6 +345,52 @@ mod priority_tests {
         td.is_race_on = 1; td.session_timestamp = 101; td.engine_max_rpm = 8000.0;
         td.current_rpm = 7900.0; td.speed_ms = 30.0; td.gear = 4; td.accel_raw = 255;
         assert!(tcu.process(&td, &Config::default(), 0.016, None).is_none());
+    }
+
+    #[test]
+    fn stale_pending_upshift_is_retried_at_redline() {
+        let mut tcu = Tcu::default();
+        tcu.last_shift = Some(Instant::now() - Duration::from_millis(400));
+        tcu.pending_shift = Some((4, 5, Instant::now() - Duration::from_millis(400)));
+        let mut td = Telemetry::default();
+        td.is_race_on = 1;
+        td.session_timestamp = 199;
+        td.engine_max_rpm = 8000.0;
+        td.current_rpm = 7900.0;
+        td.speed_ms = 30.0;
+        td.gear = 4;
+        td.accel_raw = 255;
+        let mut cfg = Config::default();
+        cfg.automatic = true;
+
+        let cmd = tcu.process(&td, &cfg, 0.016, None)
+            .expect("stale pending upshift must be retried");
+        assert_eq!(cmd.from, 4);
+        assert_eq!(cmd.to, 5);
+        assert_eq!(cmd.reason, "REDLINE OVERRIDE");
+    }
+
+    #[test]
+    fn failed_normal_upshift_is_rearmed_after_timeout() {
+        let mut tcu = Tcu::default();
+        tcu.last_shift = Some(Instant::now() - Duration::from_millis(700));
+        tcu.pending_shift = Some((4, 5, Instant::now() - Duration::from_millis(700)));
+        tcu.upshift_armed = false;
+        let mut td = Telemetry::default();
+        td.is_race_on = 1;
+        td.session_timestamp = 198;
+        td.engine_max_rpm = 8000.0;
+        td.current_rpm = 7440.0;
+        td.speed_ms = 30.0;
+        td.gear = 4;
+        td.accel_raw = 255;
+        let mut cfg = Config::default();
+        cfg.automatic = true;
+
+        let cmd = tcu.process(&td, &cfg, 0.016, None)
+            .expect("failed upshift should be retried at the normal threshold");
+        assert_eq!(cmd.to, 5);
+        assert_eq!(cmd.reason, "UPSHIFT");
     }
 
     #[test]
