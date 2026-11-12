@@ -1,0 +1,12 @@
+target/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
+build/
+dist/
+*.spec
+tcu_config.json
+tcu_calibration.json
+*.log
