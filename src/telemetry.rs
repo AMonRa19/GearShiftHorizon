@@ -72,3 +72,26 @@ impl Telemetry {
     pub fn handbrake(&self) -> f32 { self.handbrake_raw as f32 / 255.0 }
     pub fn rear_slip(&self) -> f32 { self.slip_rl.abs().max(self.slip_rr.abs()) }
 }
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_handbrake_from_packet_byte_318() {
+        let mut packet = [0u8; FH6_PACKET_SIZE];
+        packet[0..4].copy_from_slice(&1i32.to_le_bytes());
+        packet[8..12].copy_from_slice(&9000.0f32.to_le_bytes());
+        packet[12..16].copy_from_slice(&900.0f32.to_le_bytes());
+        packet[16..20].copy_from_slice(&5000.0f32.to_le_bytes());
+        packet[256..260].copy_from_slice(&25.0f32.to_le_bytes());
+        packet[318] = 255;
+        packet[319] = 4;
+
+        let telemetry = Telemetry::parse(&packet).expect("valid FH6 packet");
+        assert_eq!(telemetry.gear, 4);
+        assert_eq!(telemetry.handbrake_raw, 255);
+        assert_eq!(telemetry.handbrake(), 1.0);
+    }
+}
