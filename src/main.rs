@@ -57,6 +57,7 @@ fn main() -> Result<()> {
     thread::Builder::new().name("tcu-logic".into()).spawn(move || {
         let mut tcu = logic::Tcu::default();
         let mut previous: Option<Telemetry> = None;
+        let mut active_car_ordinal: Option<i32> = None;
         let mut expected_tcu_gear: Option<(u8, Instant)> = None;
         // Event-driven control: react as soon as a fresh UDP frame arrives.
         // If several frames are queued, discard stale ones and process only
@@ -88,6 +89,15 @@ fn main() -> Result<()> {
             let dt = now.duration_since(last).as_secs_f32().clamp(0.001, 0.2);
             last = now;
             let mut settings = cfg_logic.read().unwrap().clone();
+            // A different car has different gearing and RPM behavior. Clear only
+            // transient controller state; learned profiles remain stored per car.
+            if td.car_ordinal > 0 && active_car_ordinal != Some(td.car_ordinal) {
+                tcu = logic::Tcu::default();
+                previous = None;
+                expected_tcu_gear = None;
+                active_car_ordinal = Some(td.car_ordinal);
+                info!("Новая машина обнаружена (ordinal {}): сброшено состояние TCU", td.car_ordinal);
+            }
             if expected_tcu_gear.map(|(target, sent)| target == td.gear || sent.elapsed() > Duration::from_millis(1800)).unwrap_or(false) { expected_tcu_gear = None; }
             let active_profile = {
                 let mut cal = calibration.write().unwrap();
