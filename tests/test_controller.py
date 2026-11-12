@@ -68,3 +68,8 @@ def test_upshift_uses_conservative_one_step_fallback_before_calibration():
     assert result.direction == "UP"
     assert result.requested_gear == 5
     assert "FALLBACK" in result.reason
+
+
+def test_vehicle_analysis_exposes_lateral_g_for_live_dashboard():
+    analysis = VehicleAnalysis(lateral_accel_raw=9.80665)
+    assert analysis.lateral_g == 1.0
