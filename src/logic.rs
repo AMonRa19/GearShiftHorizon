@@ -331,4 +331,40 @@ mod priority_tests {
         td.current_rpm = 7900.0; td.speed_ms = 30.0; td.gear = 4; td.accel_raw = 255;
         assert!(tcu.process(&td, &Config::default(), 0.016, None).is_none());
     }
+
+    #[test]
+    fn handbrake_blocks_redline_override() {
+        let mut tcu = Tcu::default();
+        let mut td = Telemetry::default();
+        td.is_race_on = 1;
+        td.session_timestamp = 200;
+        td.engine_max_rpm = 8000.0;
+        td.current_rpm = 7990.0;
+        td.speed_ms = 30.0;
+        td.gear = 4;
+        td.accel_raw = 255;
+        td.handbrake_raw = 255;
+        let mut cfg = Config::default();
+        cfg.automatic = true;
+
+        assert!(tcu.process(&td, &cfg, 0.016, None).is_none());
+    }
+
+    #[test]
+    fn brake_pedal_blocks_redline_override() {
+        let mut tcu = Tcu::default();
+        let mut td = Telemetry::default();
+        td.is_race_on = 1;
+        td.session_timestamp = 201;
+        td.engine_max_rpm = 8000.0;
+        td.current_rpm = 7990.0;
+        td.speed_ms = 30.0;
+        td.gear = 4;
+        td.brake_raw = 255;
+        let mut cfg = Config::default();
+        cfg.automatic = true;
+
+        assert!(tcu.process(&td, &cfg, 0.016, None).is_none());
+    }
+
 }
